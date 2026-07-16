@@ -1,0 +1,19 @@
+{
+  "name": "church-os",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "14.1.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "@supabase/supabase-js": "^2.39.0",
+    "tesseract.js": "^4.0.3",
+    "twilio": "^4.22.0",
+    "fuse.js": "^7.0.0",           // fuzzy matching (free)
+    "multer": "^1.4.5-lts.1"     // for file uploads in API routes (not needed if using formidable)
+  }
+}
