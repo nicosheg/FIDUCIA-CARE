@@ -1,6 +1,6 @@
 import { supabaseAdmin } from '../../../lib/supabaseClient';
 import { extractNamesFromImage } from '../../../utils/ocr';
-import { matchNamesToMembers } from '../../../utils/matching';
+import { matchNamesToMembers } from '../../../lib/fuzzyMatch';
 import { processAbsentees } from '../../../utils/followUp';
 import formidable from 'formidable';
 
