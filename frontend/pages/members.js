@@ -116,4 +116,4 @@ function navStyle(active = false) {
     fontWeight: active ? 'bold' : 'normal',
     fontSize: 16,
   };
-            }
+                            }
