@@ -3,16 +3,21 @@ import twilio from 'twilio';
 export async function placeCall(member, escalate = false) {
   const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
+  // Initial TwiML: greet and first gather
   const twiml = `
     <Response>
       <Say voice="Polly.Joanna">
-        Hello ${member.first_name}, this is Grace from your church.
-        We missed seeing you recently and just wanted to check on you.
+        Hello ${member.first_name}, this is Nicholas from your church, Havilah Christian Church.
+        We missed seeing you during today’s service and wanted to check on you. Are you doing okay?
       </Say>
-      <Gather input="speech dtmf" numDigits="1" action="/api/call/response?member_id=${member.id}" timeout="5">
-        <Say>If you would like us to pray with you, press 1. If you would like a visit, press 2.</Say>
-      </Gather>
-      <Say>Thank you, and God bless you. We look forward to seeing you soon.</Say>
+      <Gather
+        input="speech"
+        action="/api/call/response?member_id=${member.id}&turn=1"
+        timeout="5"
+        speechTimeout="2"
+        language="en-US"
+      />
+      <Say>I didn’t catch that. We’ll try again later. God bless you.</Say>
     </Response>
   `;
 
@@ -20,8 +25,9 @@ export async function placeCall(member, escalate = false) {
     twiml,
     to: member.phone,
     from: process.env.TWILIO_PHONE_NUMBER,
+    timeLimit: 180,               // 3 minutes max (in seconds)
     statusCallback: `/api/call/status?member_id=${member.id}`,
-    statusCallbackEvent: ['completed'],
+    statusCallbackEvent: ['completed', 'no-answer'],
   });
 
   return call.sid;
