@@ -1,51 +1,31 @@
-import { supabaseAdmin } from '../../lib/supabaseClient';
+import pool from '../../lib/db';
 
 export default async function handler(req, res) {
-  console.log('==> Members API reached (direct table access)');
-  console.log('Method:', req.method);
-  console.log('Query:', req.query);
-  
   const churchId = req.query.church_id || req.body?.church_id;
 
   try {
     if (req.method === 'GET') {
-      const { data, error } = await supabaseAdmin
-        .from('members')
-        .select('*')
-        .eq('church_id', churchId)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('DB query error:', error);
-        return res.status(500).json({ error: error.message });
-      }
-
-      console.log('Members found:', data?.length);
-      return res.status(200).json(data || []);
+      const result = await pool.query(
+        `SELECT * FROM members WHERE church_id = $1 ORDER BY created_at DESC`,
+        [churchId]
+      );
+      return res.status(200).json(result.rows);
     }
 
     if (req.method === 'POST') {
       const { first_name, last_name, phone, church_id } = req.body;
-      console.log('Inserting member:', { first_name, last_name, phone, church_id });
-
-      const { data, error } = await supabaseAdmin
-        .from('members')
-        .insert({ first_name, last_name, phone, church_id, status: 'active' })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Insert error:', error);
-        return res.status(500).json({ error: error.message });
-      }
-
-      console.log('Inserted member:', data);
-      return res.status(200).json(data);
+      const result = await pool.query(
+        `INSERT INTO members (church_id, first_name, last_name, phone, status)
+         VALUES ($1, $2, $3, $4, 'active')
+         RETURNING *`,
+        [church_id, first_name, last_name, phone]
+      );
+      return res.status(200).json(result.rows[0]);
     }
 
     res.status(405).end();
   } catch (err) {
-    console.error('Unhandled error:', err);
+    console.error('Direct DB error:', err);
     return res.status(500).json({ error: err.message });
   }
-          }
+         }
