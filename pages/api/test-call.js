@@ -16,7 +16,7 @@ export default async function handler(req, res) {
 
   try {
     await initiateFollowUpCall(member, false);
-    return res.status(200).json({ message: `Test call initiated to ${member.first_name} ${member.last_name}` });
+    return res.status(200).json({ message: `Whatsapp message sent to ${member.first_name} ${member.last_name}` });
   } catch (err) {
     console.error('Test call error:', err);
     return res.status(500).json({ error: err.message });
