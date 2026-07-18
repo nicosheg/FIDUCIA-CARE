@@ -40,7 +40,7 @@ export default function MembersPage() {
       setForm({ first_name: '', last_name: '', phone: '' });
       setMessage(`✅ ${data.first_name} ${data.last_name} added`);
     } else {
-      setMessage('Error adding member');
+      setMessage('Error: ' + (data.error || 'Could not add member'));
     }
     setTimeout(() => setMessage(''), 3000);
   };
@@ -70,68 +70,119 @@ export default function MembersPage() {
     reader.readAsText(file);
   };
 
+  const testCall = async (memberId) => {
+    const res = await fetch('/api/test-call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ member_id: memberId }),
+    });
+    const data = await res.json();
+    alert(data.message || data.error || 'Call triggered');
+  };
+
   if (loading) return <p>Loading members...</p>;
 
   return (
-    <div style={{ padding: 20, maxWidth: 700, margin: '0 auto' }}>
-      <nav style={navBarStyle}>
+    <div style={{ padding: 20, maxWidth: 800, margin: '0 auto' }}>
+      <nav style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 20,
+        marginBottom: 30,
+        borderBottom: '1px solid #eee',
+        paddingBottom: 15,
+      }}>
         <Link href="/">📊 Dashboard</Link>
-        <Link href="/scan">📷 Scan</Link>
         <Link href="/section">✅ Section Attendance</Link>
+        <Link href="/scan">📷 Scan</Link>
         <Link href="/members" style={{ fontWeight: 'bold' }}>👥 Members</Link>
+        <Link href="/call-script">📝 Call Script</Link>
       </nav>
 
       <h1>👥 Member Management</h1>
 
       <form onSubmit={addMember} style={{ marginBottom: 30 }}>
         <h3>Add Member</h3>
-        <input placeholder="First Name" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required style={inputStyle} />
-        <input placeholder="Last Name" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} style={inputStyle} />
-        <input placeholder="Phone (+234...)" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required style={inputStyle} />
+        <input
+          placeholder="First Name"
+          value={form.first_name}
+          onChange={e => setForm({ ...form, first_name: e.target.value })}
+          required
+          style={inputStyle}
+        />
+        <input
+          placeholder="Last Name"
+          value={form.last_name}
+          onChange={e => setForm({ ...form, last_name: e.target.value })}
+          style={inputStyle}
+        />
+        <input
+          placeholder="Phone (e.g. 08012345678)"
+          value={form.phone}
+          onChange={e => setForm({ ...form, phone: e.target.value })}
+          required
+          style={inputStyle}
+        />
+        <p style={{ fontSize: 12, color: '#888', margin: '0 0 10px 0' }}>
+          +234 added automatically if you start with 0
+        </p>
         <button type="submit" style={buttonStyle}>➕ Add Member</button>
       </form>
 
       <div style={{ marginBottom: 30 }}>
         <h3>Bulk Upload (CSV)</h3>
-        <p style={{ fontSize: 14, color: '#666' }}>Format: FirstName,LastName,PhoneNumber (one per line)</p>
+        <p style={{ fontSize: 14, color: '#666' }}>
+          Format: FirstName,LastName,PhoneNumber (one per line).<br />
+          Phone numbers starting with 0 will automatically become +234.
+        </p>
         <input type="file" accept=".csv,.txt" onChange={uploadBulk} />
       </div>
 
       {message && <p style={{ background: '#e8f5e9', padding: 10, borderRadius: 8 }}>{message}</p>}
 
       <h3>All Members ({members.length})</h3>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr style={{ borderBottom: '2px solid #ddd' }}>
-            <th style={thStyle}>Name</th>
-            <th style={thStyle}>Phone</th>
-            <th style={thStyle}>Section</th>
-            <th style={thStyle}>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {members.map(m => (
-            <tr key={m.id} style={{ borderBottom: '1px solid #eee' }}>
-              <td style={tdStyle}>{m.first_name} {m.last_name}</td>
-              <td style={tdStyle}>{m.phone}</td>
-              <td style={tdStyle}>{m.section || '—'}</td>
-              <td style={tdStyle}>{m.status}</td>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 600 }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid #ddd' }}>
+              <th style={thStyle}>Name</th>
+              <th style={thStyle}>Phone</th>
+              <th style={thStyle}>Section</th>
+              <th style={thStyle}>Status</th>
+              <th style={thStyle}>Action</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {members.map(m => (
+              <tr key={m.id} style={{ borderBottom: '1px solid #eee' }}>
+                <td style={tdStyle}>{m.first_name} {m.last_name}</td>
+                <td style={tdStyle}>{m.phone}</td>
+                <td style={tdStyle}>{m.section || '—'}</td>
+                <td style={tdStyle}>{m.status}</td>
+                <td style={tdStyle}>
+                  <button
+                    onClick={() => testCall(m.id)}
+                    style={{
+                      background: '#ff9800',
+                      border: 'none',
+                      color: 'white',
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    📞 Test Call
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
-
-const navBarStyle = {
-  display: 'flex',
-  gap: 20,
-  marginBottom: 30,
-  borderBottom: '1px solid #eee',
-  paddingBottom: 15,
-  fontSize: 16,
-};
 
 const inputStyle = {
   display: 'block',
@@ -152,5 +203,5 @@ const buttonStyle = {
   marginTop: 10,
 };
 
-const thStyle = { padding: 10, textAlign: 'left' };
+const thStyle = { padding: 10, textAlign: 'left', fontWeight: 'bold' };
 const tdStyle = { padding: 10 };
