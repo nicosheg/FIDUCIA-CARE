@@ -1,45 +1,27 @@
 import twilio from 'twilio';
-import { supabaseAdmin } from '../../../lib/supabaseClient'; // adjust path if needed
 
+// WhatsApp Sandbox sender – same for all trial accounts
+const WHATSAPP_SANDBOX_FROM = 'whatsapp:+14155238886';
+
+/**
+ * Sends a WhatsApp message via Twilio Sandbox.
+ * @param {Object} member - Member object with `phone` and `first_name`
+ * @param {boolean} escalate - (unused, kept for interface compatibility)
+ * @returns {string} message SID
+ */
 export async function placeCall(member, escalate = false) {
   const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
-  // Fetch the call script from settings
-  const { data: setting } = await supabaseAdmin
-    .from('settings')
-    .select('value')
-    .eq('key', 'call_script')
-    .single();
+  const messageBody = `⛪ *Havilah Christian Church* \n\n` +
+    `Hello ${member.first_name}, we noticed you were absent from service recently and wanted to reach out. ` +
+    `You are deeply valued by your church family. We hope to see you next week! Have a blessed day. 🙏`;
 
-  const script = setting?.value || {
-    greeting: "Hello {first_name}, this is Nicholas from your church, Havilah Christian Church.",
-    body: "We missed you today. Are you doing okay?",
-    prayer: "Would you like us to pray with you?",
-    closing: "Thank you. We look forward to seeing you soon. God bless you.",
-  };
-
-  // Replace placeholder with member's name
-  const replace = (text) => text.replace('{first_name}', member.first_name);
-
-  const twiml = `
-    <Response>
-      <Say voice="Polly.Joanna">${replace(script.greeting)}</Say>
-      <Say voice="Polly.Joanna">${replace(script.body)}</Say>
-      <Gather input="speech dtmf" numDigits="1" action="/api/call/response?member_id=${member.id}" timeout="5">
-        <Say voice="Polly.Joanna">${replace(script.prayer)}</Say>
-      </Gather>
-      <Say voice="Polly.Joanna">${replace(script.closing)}</Say>
-    </Response>
-  `;
-
-  const call = await client.calls.create({
-    twiml,
-    to: member.phone,
-    from: process.env.TWILIO_PHONE_NUMBER,
-    timeLimit: 180,
-    statusCallback: `/api/call/status?member_id=${member.id}`,
-    statusCallbackEvent: ['completed', 'no-answer'],
+  const message = await client.messages.create({
+    from: WHATSAPP_SANDBOX_FROM,          // Twilio sandbox number
+    to: `whatsapp:${member.phone}`,       // target phone, must be sandbox-whitelisted
+    body: messageBody,
   });
 
-  return call.sid;
-    }
+  console.log(`WhatsApp message sent. SID: ${message.sid}`);
+  return message.sid;
+                                             }
