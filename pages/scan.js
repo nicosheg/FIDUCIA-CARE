@@ -18,7 +18,7 @@ export default function ScanPage() {
     form.append('file', file);
     form.append('church_id', 'demo-church');
     form.append('uploaded_by', 'secretary');
-    form.append('program_name', programName.trim() || 'GIBEON');
+    form.append('program_name', programName.trim() || 'GIBEON 2026');
 
     try {
       const res = await fetch('/api/attendance/scan', { method: 'POST', body: form });
