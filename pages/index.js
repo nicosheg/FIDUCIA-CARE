@@ -24,86 +24,68 @@ export default function Dashboard() {
   if (!stats) return <p>Loading...</p>;
 
   const today = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   });
 
   return (
     <Layout>
-      <div style={{ padding: 20, maxWidth: 800, margin: '0 auto' }}>
-        {/* Navigation */}
-        <nav style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 20,
-          marginBottom: 30,
-          borderBottom: '1px solid #eee',
-          paddingBottom: 15,
-        }}>
-          <a href="/" style={navLinkStyle(true)}>📊 Dashboard</a>
-          <a href="/session" style={navLinkStyle()}>📋 New Session</a>
-          <a href="/members" style={navLinkStyle()}>👥 Members</a>
-          <a href="/call-script" style={navLinkStyle()}>📝 Call Script</a>
-        </nav>
+      <div style={{ maxWidth: 900, margin: '0 auto', padding: '20px' }}>
+        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 5 }}>Today’s Attendance</h1>
+        <p style={{ fontSize: 16, color: '#555', marginBottom: 25 }}>{today}</p>
 
-        <h1>Secretary Dashboard</h1>
-        <p style={{ fontSize: 18, color: '#666' }}>{today}</p>
-
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 15, marginTop: 20 }}>
-          <Card label="Present Today" value={stats.present_count} color="#4CAF50" />
-          <Card label="Absent" value={stats.absent_count} color="#f44336" />
-          <Card label="Calls Completed" value={stats.calls_completed} />
-          <Card label="Prayer Requests" value={stats.prayer_requests} color="#2196F3" />
-          <Card label="Needs Pastor" value={stats.needs_pastor} color="#ff9800" />
-          <Card label="Wrong Numbers" value={stats.wrong_numbers} color="#9e9e9e" />
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'center' }}>
+          <StatCard icon="✅" label="Present" value={stats.present_count} color="#4CAF50" />
+          <StatCard icon="❌" label="Absent" value={stats.absent_count} color="#f44336" />
+          <StatCard icon="📞" label="Calls Completed" value={stats.calls_completed} />
+          <StatCard icon="🙏" label="Prayer Requests" value={stats.prayer_requests} color="#2196F3" />
+          <StatCard icon="🚨" label="Needs Pastor" value={stats.needs_pastor} color="#ff9800" />
+          <StatCard icon="⚠️" label="Wrong Numbers" value={stats.wrong_numbers} color="#9e9e9e" />
         </div>
 
-        {/* Quick Actions */}
-        <div style={{ marginTop: 40, display: 'flex', flexWrap: 'wrap', gap: 15 }}>
-          <a href="/session" style={actionButtonStyle}>📋 Create Attendance Session</a>
-          <a href="/call-script" style={actionButtonStyle}>📝 Edit Call Script</a>
-          <button onClick={startFollowUpCalls} style={actionButtonStyle}>📞 Start Follow‑up Calls</button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginTop: 40, justifyContent: 'center' }}>
+          <a href="/scan" style={actionBtn}>📷 Scan Attendance</a>
+          <button onClick={startFollowUpCalls} style={actionBtn}>📞 Start Follow‑up Calls</button>
         </div>
       </div>
     </Layout>
   );
 }
 
-function Card({ label, value, color = '#333' }) {
+function StatCard({ icon, label, value, color = '#333' }) {
   return (
     <div style={{
-      border: '1px solid #ddd',
-      padding: 20,
-      borderRadius: 10,
+      backdropFilter: 'blur(10px)',
+      background: 'rgba(255,255,255,0.65)',
+      borderRadius: 16,
+      padding: '20px',
       minWidth: 140,
-      backgroundColor: '#fff',
-    }}>
-      <h3 style={{ margin: 0, fontSize: 14, color: '#666' }}>{label}</h3>
-      <p style={{ fontSize: 32, fontWeight: 'bold', margin: '8px 0 0', color }}>{value}</p>
+      flex: '1 1 140px',
+      textAlign: 'center',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
+      transition: 'transform 0.2s, box-shadow 0.2s',
+      cursor: 'default',
+    }}
+      onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-3px)'}
+      onMouseLeave={e => e.currentTarget.style.transform = 'none'}
+    >
+      <div style={{ fontSize: 28, marginBottom: 5 }}>{icon}</div>
+      <div style={{ fontSize: 14, color: '#666', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 36, fontWeight: 700, color }}>{value}</div>
     </div>
   );
 }
 
-function navLinkStyle(active = false) {
-  return {
-    textDecoration: 'none',
-    color: active ? '#4F46E5' : '#333',
-    fontWeight: active ? 'bold' : 'normal',
-    fontSize: 16,
-  };
-}
-
-const actionButtonStyle = {
-  padding: '14px 24px',
-  backgroundColor: '#4F46E5',
+const actionBtn = {
+  padding: '14px 28px',
+  background: 'rgba(79,70,229,0.9)',
+  backdropFilter: 'blur(5px)',
   color: '#fff',
-  borderRadius: 10,
+  borderRadius: 14,
   textDecoration: 'none',
-  display: 'inline-block',
-  fontWeight: 'bold',
+  fontWeight: 600,
+  fontSize: 16,
   border: 'none',
   cursor: 'pointer',
-  fontSize: 16,
+  transition: 'background 0.2s',
+  boxShadow: '0 4px 12px rgba(79,70,229,0.3)',
 };
