@@ -13,9 +13,9 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const { first_name, last_name, phone, church_id } = req.body;
+      const { first_name, last_name, phone, church_id, type } = req.body;
 
-      // Auto-format Nigerian numbers: 080... → +23480...
+      // Format phone number
       let formattedPhone = phone.trim();
       if (formattedPhone.startsWith('0')) {
         formattedPhone = '+234' + formattedPhone.substring(1);
@@ -23,11 +23,13 @@ export default async function handler(req, res) {
         formattedPhone = '+' + formattedPhone;
       }
 
+      const memberType = type || 'member';   // default to 'member'
+
       const result = await pool.query(
-        `INSERT INTO members (church_id, first_name, last_name, phone, status)
-         VALUES ($1, $2, $3, $4, 'active')
+        `INSERT INTO members (church_id, first_name, last_name, phone, status, type)
+         VALUES ($1, $2, $3, $4, 'active', $5)
          RETURNING *`,
-        [church_id, first_name, last_name, formattedPhone]
+        [church_id, first_name, last_name, formattedPhone, memberType]
       );
       return res.status(200).json(result.rows[0]);
     }
@@ -37,4 +39,4 @@ export default async function handler(req, res) {
     console.error('Direct DB error:', err);
     return res.status(500).json({ error: err.message });
   }
-        }
+  }
