@@ -23,4 +23,6 @@ export default async function handler(req, res) {
     );
     return res.json({ success: true });
   }
+
+  res.status(405).end();
 }
