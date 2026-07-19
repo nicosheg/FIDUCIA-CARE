@@ -7,22 +7,17 @@ export default async function handler(req, res) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // Create session
     const sessionRes = await client.query(
-      `INSERT INTO sessions (church_id, name, status) VALUES ($1, $2, 'active') RETURNING id`,
-      [church_id, name]
+      'INSERT INTO sessions (church_id, name, status) VALUES ($1, $2, $3) RETURNING id',
+      [church_id, name, 'active']
     );
     const sessionId = sessionRes.rows[0].id;
 
-    // Insert sections and their default members (if any)
     for (const secName of sections) {
-      const secRes = await client.query(
-        `INSERT INTO session_sections (session_id, name) VALUES ($1, $2) RETURNING id`,
+      await client.query(
+        'INSERT INTO session_sections (session_id, name) VALUES ($1, $2)',
         [sessionId, secName]
       );
-      const sectionId = secRes.rows[0].id;
-      // Optionally pre-load members already assigned to this section from the members table
-      // For now, we'll leave it empty; ushers can search from the full members list
     }
 
     await client.query('COMMIT');
@@ -34,4 +29,4 @@ export default async function handler(req, res) {
   } finally {
     client.release();
   }
-      }
+                  }
