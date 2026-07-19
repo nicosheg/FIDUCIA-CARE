@@ -7,54 +7,52 @@ export default async function handler(req, res) {
 
   const client = await pool.connect();
   try {
-    // Mark session as closed
+    // Mark session closed
     await client.query('UPDATE sessions SET status = $1 WHERE id = $2', ['closed', session_id]);
 
-    // Get all attendance records for today's session
-    const today = new Date().toISOString().slice(0,10);
-    const attendance = await client.query(
-      `SELECT m.id AS member_id, m.first_name, m.phone, m.status AS member_status,
-              ar.present
+    // Get today's attendance for this session
+    const today = new Date().toISOString().slice(0, 10);
+    const attendanceRes = await client.query(
+      `SELECT m.id, m.first_name, m.phone, ar.present
        FROM members m
        LEFT JOIN attendance_records ar ON m.id = ar.member_id AND ar.attendance_date = $1
-       WHERE m.church_id = 'demo-church' AND m.status != 'deleted'`,
+       WHERE m.church_id = 'demo-church' AND m.status = 'active'`,
       [today]
     );
 
-    // Get previous 4 weeks attendance for absent classification
-    const weeks = [];
-    for (let i = 1; i <= 4; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - 7*i);
-      weeks.push(d.toISOString().slice(0,10));
+    // Fetch all templates
+    const tmplRes = await client.query(
+      'SELECT category, body FROM message_templates WHERE church_id = $1',
+      ['demo-church']
+    );
+    const templates = {};
+    tmplRes.rows.forEach(r => { templates[r.category] = r.body; });
+
+    let sent = 0;
+    for (const member of attendanceRes.rows) {
+      if (member.present) continue;
+      // Simple classification (for demo, use first_absence; later add logic)
+      const category = 'first_absence';
+      const body = templates[category] || 'Hello {first_name}, we missed you.';
+      const message = body.replace('{first_name}', member.first_name);
+
+      try {
+        await initiateFollowUpCall(
+          { phone: member.phone, first_name: member.first_name },
+          false,
+          message
+        );
+        sent++;
+      } catch (e) {
+        console.error(`Failed to send to ${member.phone}:`, e.message);
+      }
     }
 
-    for (const member of attendance.rows) {
-      if (member.present) continue; // skip present
-
-      // Determine category
-      let category = 'first_absence';
-      // TODO: implement logic using previous attendance to set 'second_absence', 'returning', etc.
-      // For demo, simply use 'first_absence'
-
-      // Fetch template for that category
-      const tmplRes = await client.query(
-        'SELECT body FROM message_templates WHERE church_id = $1 AND category = $2',
-        ['demo-church', category]
-      );
-      const template = tmplRes.rows[0]?.body || 'Hello {first_name}, we missed you.';
-      const message = template.replace('{first_name}', member.first_name);
-
-      // Send via WhatsApp bridge (which uses church's own number)
-      await initiateFollowUpCall({ phone: member.phone, first_name: member.first_name }, false, message);
-      // Note: we modified initiateFollowUpCall to accept optional message override
-    }
-
-    res.json({ success: true, processed: attendance.rows.filter(r => !r.present).length });
+    res.json({ success: true, processed: attendanceRes.rows.filter(r => !r.present).length, sent });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
   }
-  }
+}
