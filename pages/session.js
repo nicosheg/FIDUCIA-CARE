@@ -12,13 +12,10 @@ export default function SessionPage() {
   const [editCategory, setEditCategory] = useState(null);
   const [editBody, setEditBody] = useState('');
 
-  // Load templates from DB
   useEffect(() => {
     fetch(`/api/templates?church_id=${CHURCH_ID}`)
       .then(r => r.json())
-      .then(data => {
-        if (data && typeof data === 'object') setTemplates(data);
-      });
+      .then(data => { if (data && typeof data === 'object') setTemplates(data); });
   }, []);
 
   const addSection = () => {
@@ -36,7 +33,6 @@ export default function SessionPage() {
     });
     const data = await res.json();
     if (data.id) {
-      // Redirect to first section
       router.push(`/section?sessionId=${data.id}&section=${encodeURIComponent(sections[0])}`);
     } else {
       alert('Error creating session');
@@ -65,9 +61,7 @@ export default function SessionPage() {
       <div style={{ marginBottom: 20 }}>
         <label>Sections (Usher Assignments)</label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0' }}>
-          {sections.map(s => (
-            <span key={s} style={tagStyle}>{s}</span>
-          ))}
+          {sections.map(s => (<span key={s} style={tagStyle}>{s}</span>))}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <input value={newSection} onChange={e => setNewSection(e.target.value)} placeholder="New section" style={inputStyle} />
@@ -76,7 +70,8 @@ export default function SessionPage() {
       </div>
 
       <h2>WhatsApp Message Templates</h2>
-      <p style={{ fontSize: 14, color: '#555' }}>Edit the messages that will be sent automatically. Ushers can personalize these now.</p>
+      <p style={{ fontSize: 14, color: '#555' }}>Ushers can personalize these messages before sending.</p>
+
       {Object.entries(templates).map(([category, body]) => (
         <div key={category} style={{ marginBottom: 15, border: '1px solid #ddd', borderRadius: 8, padding: 12 }}>
           <strong>{category.replace(/_/g, ' ')}</strong>
@@ -95,7 +90,7 @@ export default function SessionPage() {
         </div>
       ))}
 
-      <button onClick={startSession} style={bigBtn}>Start Session &rarr;</button>
+      <button onClick={startSession} style={bigBtn}>Start Session →</button>
     </div>
   );
 }
