@@ -9,7 +9,6 @@ export default function ScanPage() {
   const [scanState, setScanStateLocal] = useState(getScanState());
   const [programName, setProgramName] = useState('GIBEON');
 
-  // Restore persistent scan state
   useEffect(() => {
     const state = getScanState();
     setScanStateLocal(state);
@@ -20,14 +19,17 @@ export default function ScanPage() {
     setScanStateLocal(prev => ({ ...prev, ...newState }));
   };
 
-  // Resize and convert to base64
   const fileToBase64 = (file) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
-      img.src = URL.createObjectURL(file);
+      const objectUrl = URL.createObjectURL(file);
+      img.src = objectUrl;
       img.onload = () => {
-        const MAX_WIDTH = 800;
-        const MAX_HEIGHT = 800;
+        // Release object URL immediately
+        URL.revokeObjectURL(objectUrl);
+
+        const MAX_WIDTH = 600;       // smaller for memory‑constrained phones
+        const MAX_HEIGHT = 600;
         let width = img.width;
         let height = img.height;
 
@@ -46,10 +48,32 @@ export default function ScanPage() {
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        const base64 = canvas.toDataURL('image/jpeg', 0.6);
-        resolve(base64.split(',')[1]); // only the base64 data part
+        // Convert to blob with reduced quality
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              reject(new Error('Canvas toBlob failed'));
+              return;
+            }
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64 = reader.result.split(',')[1];
+              // Clear canvas memory
+              canvas.width = 0;
+              canvas.height = 0;
+              resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          },
+          'image/jpeg',
+          0.5           // lower quality = smaller base64
+        );
       };
-      img.onerror = reject;
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Image loading failed'));
+      };
     });
   };
 
@@ -57,11 +81,14 @@ export default function ScanPage() {
     const file = e.target.files[0];
     if (!file) return;
 
-    updateState({ status: 'processing', message: 'Preparing image...' });
+    // Release the file input reference to free memory
+    e.target.value = null;
+
+    updateState({ status: 'processing', message: 'Optimizing image...' });
 
     try {
       const base64 = await fileToBase64(file);
-      updateState({ message: 'Uploading and scanning...' });
+      updateState({ message: 'Scanning names...' });
 
       const res = await fetch('/api/attendance/scan-base64', {
         method: 'POST',
@@ -85,17 +112,15 @@ export default function ScanPage() {
           router.push('/');
         }, 3000);
       } else {
-        // Show the specific error from the server, or fallback
         updateState({
           status: 'error',
-          message: '❌ Error: ' + (data.error || data.message || 'Unknown server error'),
+          message: '❌ Error: ' + (data.error || 'Unknown'),
         });
       }
     } catch (err) {
-      // Network or fetch error
       updateState({
         status: 'error',
-        message: '❌ Network error: ' + (err.message || 'Could not reach server'),
+        message: '❌ ' + (err.message || 'Something went wrong'),
       });
     }
   };
@@ -113,9 +138,7 @@ export default function ScanPage() {
         {scanState.status === 'idle' && (
           <>
             <div style={{ marginBottom: 25 }}>
-              <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>
-                Program / Event Name
-              </label>
+              <label style={{ fontWeight: 600, display: 'block', marginBottom: 8 }}>Program / Event Name</label>
               <input
                 type="text"
                 value={programName}
@@ -185,4 +208,4 @@ export default function ScanPage() {
       </div>
     </Layout>
   );
-      }
+            }
