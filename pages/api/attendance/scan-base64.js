@@ -17,61 +17,45 @@ export default async function handler(req, res) {
   const programName = program_name || 'GIBEON';
 
   try {
-    // Write base64 image to a temporary file on Render's disk
+    // Write base64 image to a temporary file
     const tmpDir = '/tmp';
     const tmpFile = path.join(tmpDir, `scan-${Date.now()}.jpg`);
     const buffer = Buffer.from(image_base64, 'base64');
     fs.writeFileSync(tmpFile, buffer);
 
-    // Run OCR using Tesseract.js
+    // Run OCR – no custom parameters, default works perfectly
     const worker = await Tesseract.createWorker('eng');
-    await worker.setParameters({
-      tessedit_char_whitelist:
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+ ',
-      preserve_interword_spaces: '1',
-    });
-    const {
-      data: { text },
-    } = await worker.recognize(tmpFile);
+    const { data: { text } } = await worker.recognize(tmpFile);
     await worker.terminate();
 
-    // Clean up the temporary file
+    // Clean up temp file
     fs.unlinkSync(tmpFile);
 
-    // Parse the OCR text into names
-    const lines = text
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean);
-    const extractedNames = lines.map((line) => {
+    // Parse names from OCR text
+    const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+    const extractedNames = lines.map(line => {
       const parts = line.split(/\s+/);
       if (parts.length === 1) return { first_name: parts[0], last_name: '' };
       return { first_name: parts[0], last_name: parts.slice(1).join(' ') };
     });
 
     if (extractedNames.length === 0) {
-      return res.status(400).json({
-        error: 'No names detected. Please ensure the photo is clear and contains handwritten names.',
-      });
+      return res.status(400).json({ error: 'No names detected. Please ensure the photo is clear and contains handwritten names.' });
     }
 
-    // ---------- Database operations (direct PostgreSQL, no Supabase Storage) ----------
+    // ---------- Database operations (unchanged) ----------
     const client = await pool.connect();
 
-    // Fetch existing active members
     const membersRes = await client.query(
-      `SELECT id, first_name, last_name FROM members
-       WHERE church_id = $1 AND status = 'active'
-         AND (deleted_at IS NULL OR deleted_at > NOW() - INTERVAL '30 days')`,
+      `SELECT id, first_name, last_name FROM members WHERE church_id = $1 AND status = 'active'
+       AND (deleted_at IS NULL OR deleted_at > NOW() - INTERVAL '30 days')`,
       [churchId]
     );
     const membersList = membersRes.rows;
 
-    // Fuzzy match extracted names against existing members
     const { presentIds, unmatched } = matchNamesToMembers(extractedNames, membersList);
     let newMembersCount = 0;
 
-    // Create new members for unmatched names
     for (const fullName of unmatched) {
       const parts = fullName.split(' ');
       const firstName = parts[0];
@@ -86,11 +70,9 @@ export default async function handler(req, res) {
       newMembersCount++;
     }
 
-    // Session handling (create or reuse today's session for this program)
     const today = new Date().toISOString().slice(0, 10);
     let sessionRes = await client.query(
-      `SELECT id FROM sessions
-       WHERE church_id = $1 AND name = $2 AND created_at::date = $3`,
+      `SELECT id FROM sessions WHERE church_id = $1 AND name = $2 AND created_at::date = $3`,
       [churchId, programName, today]
     );
     let sessionId;
@@ -108,14 +90,12 @@ export default async function handler(req, res) {
       sessionId = sessionRes.rows[0].id;
     }
 
-    // Get the "All" section ID
     const sectionRes = await client.query(
       `SELECT id FROM session_sections WHERE session_id = $1 AND name = 'All'`,
       [sessionId]
     );
     const sectionId = sectionRes.rows[0].id;
 
-    // Mark matched/added members as present
     for (const memberId of presentIds) {
       await client.query(
         `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
@@ -125,8 +105,7 @@ export default async function handler(req, res) {
       );
     }
 
-    // Mark other active members as absent
-    const allActiveIds = membersList.map((m) => m.id);
+    const allActiveIds = membersList.map(m => m.id);
     for (const id of allActiveIds) {
       if (!presentIds.includes(id)) {
         await client.query(
@@ -147,8 +126,7 @@ export default async function handler(req, res) {
       new_members: newMembersCount,
     });
   } catch (error) {
-    // Now the frontend will see the real error message
     console.error('Scan base64 error:', error);
     return res.status(500).json({ error: error.message || error.toString() });
   }
-           }
+      }
