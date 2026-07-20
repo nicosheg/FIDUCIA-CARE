@@ -2,7 +2,6 @@ import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Layout from '../components/Layout';
 import { getScanState, setScanState, clearScanState } from '../lib/scanStore';
-import Tesseract from 'tesseract.js';
 
 export default function ScanPage() {
   const router = useRouter();
@@ -10,6 +9,7 @@ export default function ScanPage() {
   const [scanState, setScanStateLocal] = useState(getScanState());
   const [programName, setProgramName] = useState('GIBEON');
 
+  // Restore any existing scan state (survives page navigation)
   useEffect(() => {
     const state = getScanState();
     setScanStateLocal(state);
@@ -20,21 +20,36 @@ export default function ScanPage() {
     setScanStateLocal(prev => ({ ...prev, ...newState }));
   };
 
-  // Perform OCR directly in the browser
-  const extractNamesFromFile = async (file) => {
-    const worker = await Tesseract.createWorker('eng');
-    await worker.setParameters({
-      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+ ',
-      preserve_interword_spaces: '1',
-    });
-    const { data: { text } } = await worker.recognize(file);
-    await worker.terminate();
+  // Resize the image and return its base64 representation
+  const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = () => {
+        const MAX_WIDTH = 800;
+        const MAX_HEIGHT = 800;
+        let width = img.width;
+        let height = img.height;
 
-    const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
-    return lines.map(line => {
-      const parts = line.split(/\s+/);
-      if (parts.length === 1) return { first_name: parts[0], last_name: '' };
-      return { first_name: parts[0], last_name: parts.slice(1).join(' ') };
+        if (width > MAX_WIDTH) {
+          height = (height * MAX_WIDTH) / width;
+          width = MAX_WIDTH;
+        }
+        if (height > MAX_HEIGHT) {
+          width = (width * MAX_HEIGHT) / height;
+          height = MAX_HEIGHT;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const base64 = canvas.toDataURL('image/jpeg', 0.6);
+        resolve(base64.split(',')[1]); // only the base64 data
+      };
+      img.onerror = reject;
     });
   };
 
@@ -42,26 +57,19 @@ export default function ScanPage() {
     const file = e.target.files[0];
     if (!file) return;
 
-    updateState({ status: 'processing', message: 'Reading names...' });
+    updateState({ status: 'processing', message: 'Preparing image...' });
 
     try {
-      // 1. OCR in the browser
-      const extractedNames = await extractNamesFromFile(file);
-      if (extractedNames.length === 0) {
-        updateState({ status: 'error', message: '❌ No names detected. Please try again with a clearer photo.' });
-        return;
-      }
+      const base64 = await fileToBase64(file);
+      updateState({ message: 'Uploading and scanning...' });
 
-      updateState({ message: `Found ${extractedNames.length} names. Saving...` });
-
-      // 2. Send extracted names to backend
-      const res = await fetch('/api/attendance/process-names', {
+      const res = await fetch('/api/attendance/scan-base64', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           church_id: 'demo-church',
           program_name: programName.trim() || 'GIBEON',
-          names: extractedNames,
+          image_base64: base64,
         }),
       });
 
@@ -80,7 +88,7 @@ export default function ScanPage() {
         updateState({ status: 'error', message: '❌ Error: ' + (data.error || 'Unknown') });
       }
     } catch (err) {
-      updateState({ status: 'error', message: '❌ Error: ' + err.message });
+      updateState({ status: 'error', message: '❌ Network error: ' + err.message });
     }
   };
 
@@ -169,4 +177,4 @@ export default function ScanPage() {
       </div>
     </Layout>
   );
-    }
+  }
