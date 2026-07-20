@@ -1,4 +1,4 @@
-import { IncomingForm } from 'formidable';
+import { IncomingForm } from 'formidable';   // ✅ correct for v3
 import { supabaseAdmin } from '../../../lib/supabaseClient';
 import { extractNamesFromImage } from '../../../utils/ocr';
 import { matchNamesToMembers } from '../../../lib/fuzzyMatch';
@@ -26,7 +26,7 @@ export default async function handler(req, res) {
         const file = files.file?.[0];   // formidable v3 returns arrays
         if (!file) return res.status(400).json({ error: 'No file uploaded' });
 
-        // 1. Upload to Supabase Storage (this is fine, it only uses storage)
+        // ---------- Upload to Supabase Storage ----------
         const fileBuffer = fs.readFileSync(file.filepath);
         const fileExt = file.originalFilename.split('.').pop();
         const filePath = `${churchId}/${Date.now()}.${fileExt}`;
@@ -45,24 +45,21 @@ export default async function handler(req, res) {
           .getPublicUrl(filePath);
         const publicUrl = urlData.publicUrl;
 
-        // 2. OCR – free, no database
+        // ---------- OCR ----------
         const extractedNames = await extractNamesFromImage(publicUrl);
 
-        // 3. ALL DATABASE OPERATIONS USE DIRECT POOL (NO supabaseAdmin.from)
+        // ---------- Direct database (NO supabaseAdmin.from) ----------
         const client = await pool.connect();
-
-        // Fetch active members
         const membersRes = await client.query(
           `SELECT id, first_name, last_name FROM members WHERE church_id = $1 AND status = 'active'`,
           [churchId]
         );
         const membersList = membersRes.rows;
 
-        // Fuzzy match
         const { presentIds, unmatched } = matchNamesToMembers(extractedNames, membersList);
         let newMembersCount = 0;
 
-        // Add unmatched as new members
+        // Add unmatched names as new members
         for (const fullName of unmatched) {
           const parts = fullName.split(' ');
           const firstName = parts[0];
@@ -77,7 +74,7 @@ export default async function handler(req, res) {
           newMembersCount++;
         }
 
-        // Session handling
+        // ---------- Session handling ----------
         const today = new Date().toISOString().slice(0, 10);
         let sessionRes = await client.query(
           `SELECT id FROM sessions WHERE church_id = $1 AND name = $2 AND created_at::date = $3`,
@@ -144,4 +141,4 @@ export default async function handler(req, res) {
     console.error('SCAN OUTER ERROR:', outerError);
     res.status(500).json({ error: outerError.message });
   }
-  }
+    }
