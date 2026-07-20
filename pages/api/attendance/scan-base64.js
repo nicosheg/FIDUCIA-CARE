@@ -19,7 +19,7 @@ export default async function handler(req, res) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         base64Image: `data:image/jpeg;base64,${image_base64}`,
-        apikey: 'helloworld',      // free public key
+        apikey: 'helloworld',
         language: 'eng',
         isOverlayRequired: false,
         detectOrientation: true,
@@ -29,13 +29,16 @@ export default async function handler(req, res) {
     });
 
     const ocrData = await ocrRes.json();
+    console.log('OCR.space response:', JSON.stringify(ocrData, null, 2));
+
     if (ocrData.IsErroredOnProcessing || !ocrData.ParsedResults?.length) {
-      return res.status(400).json({ error: ocrData.ErrorMessage || 'OCR processing failed' });
+      const errMsg = ocrData.ErrorMessage || 'No parsed results';
+      return res.status(400).json({ error: `OCR failed: ${errMsg}` });
     }
 
     const rawText = ocrData.ParsedResults[0].ParsedText;
 
-    // Parse names from OCR text (same parsing logic)
+    // Parse names
     const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
     const extractedNames = lines.map(line => {
       const parts = line.split(/\s+/);
@@ -44,10 +47,10 @@ export default async function handler(req, res) {
     });
 
     if (extractedNames.length === 0) {
-      return res.status(400).json({ error: 'No names detected.' });
+      return res.status(400).json({ error: 'No names detected. Please try a clearer photo.' });
     }
 
-    // Database operations (unchanged – direct pool)
+    // Database operations (unchanged – using direct pool)
     const client = await pool.connect();
     const membersRes = await client.query(
       `SELECT id, first_name, last_name FROM members WHERE church_id = $1 AND status = 'active'`,
@@ -131,4 +134,4 @@ export default async function handler(req, res) {
     console.error('OCR.space scan error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-    }
+          }
