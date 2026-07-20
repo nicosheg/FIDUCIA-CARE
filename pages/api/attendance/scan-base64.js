@@ -9,16 +9,27 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'No image data received' });
   }
 
+  // Strip data URL prefix if present (shouldn't be, but just in case)
+  let base64 = image_base64.replace(/^data:image\/\w+;base64,/, '');
+  // Remove any whitespace
+  base64 = base64.replace(/\s/g, '');
+  
+  console.log('Base64 length:', base64.length);
+  
+  if (base64.length < 100) {
+    return res.status(400).json({ error: 'Image too small or corrupted. Please retake the photo.' });
+  }
+
   const churchId = church_id || 'demo-church';
   const programName = program_name || 'GIBEON';
 
   try {
-    // Call OCR.space free API
+    // Call OCR.space
     const ocrRes = await fetch('https://api.ocr.space/parse/image', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        base64Image: `data:image/jpeg;base64,${image_base64}`,
+        base64Image: `data:image/jpeg;base64,${base64}`,
         apikey: 'helloworld',
         language: 'eng',
         isOverlayRequired: false,
@@ -38,7 +49,7 @@ export default async function handler(req, res) {
 
     const rawText = ocrData.ParsedResults[0].ParsedText;
 
-    // Parse names
+    // Parse names (unchanged)
     const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
     const extractedNames = lines.map(line => {
       const parts = line.split(/\s+/);
@@ -134,4 +145,4 @@ export default async function handler(req, res) {
     console.error('OCR.space scan error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-          }
+}
