@@ -9,7 +9,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'No image data received' });
   }
 
-  // Clean the base64 string
   let base64 = image_base64.replace(/^data:image\/\w+;base64,/, '').replace(/\s/g, '');
   if (base64.length < 100) {
     return res.status(400).json({ error: 'Image too small or corrupted. Please retake the photo.' });
@@ -19,7 +18,7 @@ export default async function handler(req, res) {
   const programName = program_name || 'GIBEON';
 
   try {
-    // ── 1. OCR via OCR.space (form‑encoded) ──
+    // ── 1. OCR via OCR.space ──
     const params = new URLSearchParams();
     params.append('base64Image', `data:image/jpeg;base64,${base64}`);
     params.append('apikey', 'helloworld');
@@ -36,8 +35,6 @@ export default async function handler(req, res) {
     });
 
     const ocrData = await ocrRes.json();
-    console.log('OCR.space response:', JSON.stringify(ocrData, null, 2));
-
     if (ocrData.IsErroredOnProcessing || !ocrData.ParsedResults?.length) {
       const errMsg = ocrData.ErrorMessage || 'No parsed results';
       return res.status(400).json({ error: `OCR failed: ${errMsg}` });
@@ -45,103 +42,58 @@ export default async function handler(req, res) {
 
     const rawText = ocrData.ParsedResults[0].ParsedText;
 
-    // ── 2. Smart name & phone extraction ──
-    const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
-    const extractedNames = [];
-    let pendingPhone = null;
-
-    const isPhoneLike = (str) => {
-      const digits = str.replace(/\D/g, '');
-      return digits.length >= 8;
-    };
-
-    const isHeader = (str) =>
-      /^(name|phone|telephone|attendance|date|program|service|total)$/i.test(str);
-
-    lines.forEach(line => {
-      if (isHeader(line)) return;
-
-      // If line is primarily a phone number, store it for next name
-      if (isPhoneLike(line) && !/[a-zA-Z]{2,}/.test(line)) {
-        pendingPhone = line.replace(/[\s\-\/\\|]/g, '');
-        return;
-      }
-
-      // Check for a phone number at the end of the line
-      const phoneMatch = line.match(/(.*?)([0-9+\-\s]{8,})$/);
-      let namePart = line;
-      let phonePart = null;
-
-      if (phoneMatch) {
-        namePart = phoneMatch[1].trim();
-        phonePart = phoneMatch[2].replace(/[\s\-\/\\|]/g, '');
-      }
-
-      // Keep only if namePart has at least 2 letters (likely a real name)
-      if (namePart.length >= 2 && /[a-zA-Z]{2,}/.test(namePart)) {
-        const parts = namePart.split(/\s+/);
-        extractedNames.push({
-          first_name: parts[0],
-          last_name: parts.slice(1).join(' '),
-          phone: phonePart || pendingPhone || '',
-        });
-        pendingPhone = null;
-      }
+    // ── 2. AI Correction & Structuring ──
+    const aiRes = await fetch(`${req.headers.origin || 'http://localhost:3000'}/api/ai/correct-scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rawText }),
     });
 
-    // If a phone was left at the end, attach it to the last name
-    if (pendingPhone && extractedNames.length > 0) {
-      extractedNames[extractedNames.length - 1].phone = pendingPhone;
+    if (!aiRes.ok) {
+      const err = await aiRes.json();
+      return res.status(500).json({ error: 'AI correction failed: ' + (err.error || 'unknown') });
     }
 
-    // ── 3. Normalize phone numbers & remove duplicates ──
-    const uniqueNames = [];
-    const seen = new Set();
+    const { people } = await aiRes.json();
+    if (!people || people.length === 0) {
+      return res.status(400).json({ error: 'No people found in the image.' });
+    }
 
-    for (const nameObj of extractedNames) {
-      // Normalize phone
-      let phone = (nameObj.phone || '').replace(/[\s\-\/\\|]/g, '');
-      if (phone.startsWith('0')) phone = '+234' + phone.substring(1);
-      if (phone.startsWith('234') && !phone.startsWith('+')) phone = '+' + phone;
+    // ── 3. Separate high‑confidence (>90) and low‑confidence entries ──
+    const highConfidence = people.filter(p => p.confidence >= 90);
+    const lowConfidence = people.filter(p => p.confidence < 90);
 
-      const key = `${nameObj.first_name}|${nameObj.last_name}|${phone}`;
-      if (!seen.has(key)) {
-        uniqueNames.push({ ...nameObj, phone });
-        seen.add(key);
+    // ── 4. Save high‑confidence immediately ──
+    const client = await pool.connect();
+    let presentIds = [];
+    let newMembersCount = 0;
+
+    if (highConfidence.length > 0) {
+      const membersRes = await client.query(
+        `SELECT id, first_name, last_name FROM members WHERE church_id = $1 AND status = 'active'`,
+        [churchId]
+      );
+      const membersList = membersRes.rows;
+
+      const { presentIds: matched, unmatched } = matchNamesToMembers(highConfidence, membersList);
+      presentIds = matched;
+
+      for (const person of unmatched) {
+        const firstName = person.first_name;
+        const lastName = person.last_name || '';
+        const phone = person.phone || '';
+        const insertRes = await client.query(
+          `INSERT INTO members (church_id, first_name, last_name, phone, status, type)
+           VALUES ($1, $2, $3, $4, 'active', 'visitor')
+           RETURNING id`,
+          [churchId, firstName, lastName, phone]
+        );
+        presentIds.push(insertRes.rows[0].id);
+        newMembersCount++;
       }
     }
 
-    if (uniqueNames.length === 0) {
-      return res.status(400).json({ error: 'No names detected. Please try a clearer photo.' });
-    }
-
-    // ── 4. Database operations ──
-    const client = await pool.connect();
-
-    const membersRes = await client.query(
-      `SELECT id, first_name, last_name FROM members WHERE church_id = $1 AND status = 'active'`,
-      [churchId]
-    );
-    const membersList = membersRes.rows;
-
-    const { presentIds, unmatched } = matchNamesToMembers(uniqueNames, membersList);
-    let newMembersCount = 0;
-
-    for (const nameObj of unmatched) {
-      const firstName = nameObj.first_name;
-      const lastName = nameObj.last_name;
-      const phone = nameObj.phone || '';
-
-      const insertRes = await client.query(
-        `INSERT INTO members (church_id, first_name, last_name, phone, status, type)
-         VALUES ($1, $2, $3, $4, 'active', 'visitor')
-         RETURNING id`,
-        [churchId, firstName, lastName, phone]
-      );
-      presentIds.push(insertRes.rows[0].id);
-      newMembersCount++;
-    }
-
+    // ── 5. Attendance recording (for high confidence only, low confidence stored for later review) ──
     const today = new Date().toISOString().slice(0, 10);
     let sessionRes = await client.query(
       `SELECT id FROM sessions WHERE church_id = $1 AND name = $2 AND created_at::date = $3`,
@@ -177,7 +129,12 @@ export default async function handler(req, res) {
       );
     }
 
-    const allActiveIds = membersList.map(m => m.id);
+    // Mark others absent
+    const allActive = await client.query(
+      `SELECT id FROM members WHERE church_id = $1 AND status = 'active'`,
+      [churchId]
+    );
+    const allActiveIds = allActive.rows.map(r => r.id);
     for (const id of allActiveIds) {
       if (!presentIds.includes(id)) {
         await client.query(
@@ -196,9 +153,11 @@ export default async function handler(req, res) {
       present_count: presentIds.length,
       absent_count: allActiveIds.length - presentIds.length,
       new_members: newMembersCount,
+      low_confidence: lowConfidence, // return these for review
+      reviewed: highConfidence.length,
     });
   } catch (error) {
-    console.error('OCR.space scan error:', error);
+    console.error('AI‑corrected scan error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-}
+      }
