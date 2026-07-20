@@ -6,25 +6,32 @@ const CHURCH_ID = 'demo-church';
 export default function MembersPage() {
   const [members, setMembers] = useState([]);
   const [filtered, setFiltered] = useState([]);
+  const [pendingReviews, setPendingReviews] = useState([]);
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ first_name: '', last_name: '', phone: '' });
   const [showAddForm, setShowAddForm] = useState(false);
+  const [form, setForm] = useState({ full_name: '', phone: '' });
+  const [editReview, setEditReview] = useState(null);
 
   useEffect(() => {
-    fetch(`/api/members?church_id=${CHURCH_ID}`)
-      .then(r => r.json())
-      .then(data => {
-        const arr = Array.isArray(data) ? data : [];
-        setMembers(arr);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    fetchMembers();
+    fetchPendingReviews();
   }, []);
 
-  // Apply filters
+  const fetchMembers = async () => {
+    const res = await fetch(`/api/members?church_id=${CHURCH_ID}`);
+    const data = await res.json();
+    if (Array.isArray(data)) { setMembers(data); setLoading(false); }
+  };
+
+  const fetchPendingReviews = async () => {
+    const res = await fetch(`/api/pending-reviews?church_id=${CHURCH_ID}`);
+    const data = await res.json();
+    if (Array.isArray(data)) setPendingReviews(data);
+  };
+
   useEffect(() => {
     let result = [...members];
     if (typeFilter !== 'all') {
@@ -33,14 +40,13 @@ export default function MembersPage() {
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(m =>
-        `${m.first_name} ${m.last_name}`.toLowerCase().includes(q) ||
+        (m.first_name || '').toLowerCase().includes(q) ||
         (m.phone && m.phone.includes(q))
       );
     }
-    // Sort: members first, then visitors, then by name
     result.sort((a, b) => {
       if ((a.type === 'member') !== (b.type === 'member')) return a.type === 'member' ? -1 : 1;
-      return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
+      return (a.first_name || '').localeCompare(b.first_name || '');
     });
     setFiltered(result);
   }, [members, search, typeFilter]);
@@ -50,18 +56,22 @@ export default function MembersPage() {
     const res = await fetch('/api/members', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, church_id: CHURCH_ID, type: 'member' }),
+      body: JSON.stringify({
+        first_name: form.full_name,
+        last_name: '',
+        phone: form.phone,
+        church_id: CHURCH_ID,
+        type: 'member',
+      }),
     });
     const data = await res.json();
     if (data?.id) {
       setMembers(prev => [data, ...prev]);
-      setForm({ first_name: '', last_name: '', phone: '' });
+      setForm({ full_name: '', phone: '' });
       setShowAddForm(false);
       setMessage(`✅ ${data.first_name} added`);
       setTimeout(() => setMessage(''), 3000);
-    } else {
-      setMessage('Error: ' + (data.error || 'Could not add'));
-    }
+    } else setMessage('Error: ' + (data.error || 'Could not add'));
   };
 
   const handleDelete = async (memberId) => {
@@ -74,6 +84,38 @@ export default function MembersPage() {
     setMembers(prev => prev.filter(m => m.id !== memberId));
   };
 
+  const handleApproveReview = async (reviewId, corrected) => {
+    await fetch('/api/pending-reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: reviewId,
+        action: 'approve',
+        corrected: corrected ? {
+          first_name: corrected.full_name,
+          last_name: '',
+          phone: corrected.phone
+        } : null,
+      }),
+    });
+    fetchMembers();
+    fetchPendingReviews();
+    setEditReview(null);
+    setMessage('✅ Member approved and added');
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const handleRejectReview = async (reviewId) => {
+    await fetch('/api/pending-reviews', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: reviewId, action: 'reject' }),
+    });
+    fetchPendingReviews();
+    setMessage('❌ Entry rejected');
+    setTimeout(() => setMessage(''), 3000);
+  };
+
   if (loading) return <p>Loading...</p>;
 
   return (
@@ -81,160 +123,85 @@ export default function MembersPage() {
       <div style={{ maxWidth: 900, margin: '0 auto', padding: '20px' }}>
         <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 20 }}>👥 Members</h1>
 
-        {/* Controls bar */}
+        {pendingReviews.length > 0 && (
+          <div style={{ background: 'rgba(255,152,0,0.15)', backdropFilter: 'blur(5px)', border: '1px solid #ff9800', borderRadius: 16, padding: '14px 20px', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 600 }}>🔍 {pendingReviews.length} names need your review</span>
+            <button onClick={() => document.getElementById('reviews-section').scrollIntoView({ behavior: 'smooth' })} style={{ marginLeft: 16, padding: '6px 14px', background: '#ff9800', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' }}>Review Now</button>
+          </div>
+        )}
+
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 20, alignItems: 'center' }}>
-          <input
-            type="text"
-            placeholder="🔍 Search name or phone"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={searchStyle}
-          />
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={selectStyle}>
+          <input type="text" placeholder="🔍 Search name or phone" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid #ddd', background: 'rgba(255,255,255,0.8)', backdropFilter: 'blur(5px)', outline: 'none' }} />
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid #ddd', background: 'rgba(255,255,255,0.8)', backdropFilter: 'blur(5px)', cursor: 'pointer' }}>
             <option value="all">All ({members.length})</option>
             <option value="member">Members ({members.filter(m => m.type === 'member' || !m.type).length})</option>
             <option value="visitor">Visitors ({members.filter(m => m.type === 'visitor').length})</option>
           </select>
-          <button onClick={() => setShowAddForm(!showAddForm)} style={addButtonStyle}>
-            ➕ Add Member
-          </button>
+          <button onClick={() => setShowAddForm(!showAddForm)} style={{ padding: '10px 18px', background: '#4F46E5', color: 'white', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer' }}>➕ Add Member</button>
         </div>
 
-        {/* Add form (collapsible) */}
         {showAddForm && (
-          <form onSubmit={addMember} style={formContainerStyle}>
-            <input placeholder="First Name" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required style={miniInput} />
-            <input placeholder="Last Name" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} style={miniInput} />
-            <input placeholder="Phone (080...)" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required style={miniInput} />
-            <button type="submit" style={primaryBtn}>Save</button>
+          <form onSubmit={addMember} style={{ background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(10px)', borderRadius: 16, padding: 20, marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <input placeholder="Full Name (e.g., Bro Jerry)" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} required style={{ padding: '10px', borderRadius: 8, border: '1px solid #ddd' }} />
+            <input placeholder="Phone (080...)" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required style={{ padding: '10px', borderRadius: 8, border: '1px solid #ddd' }} />
+            <button type="submit" style={{ padding: '10px 20px', background: '#4F46E5', color: 'white', border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer' }}>Save</button>
           </form>
         )}
 
-        {message && <div style={messageStyle}>{message}</div>}
+        {message && <div style={{ background: '#e8f5e9', padding: 10, borderRadius: 12, marginBottom: 15 }}>{message}</div>}
 
-        {/* Members grid / cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16, marginTop: 10 }}>
+        {pendingReviews.length > 0 && (
+          <div id="reviews-section" style={{ marginBottom: 30 }}>
+            <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 15 }}>🔍 Need Review ({pendingReviews.length})</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+              {pendingReviews.map(review => (
+                <div key={review.id} style={{ background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(10px)', borderRadius: 16, padding: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.08)', borderLeft: '4px solid #ff9800' }}>
+                  {editReview === review.id ? (
+                    <div>
+                      <input style={{ padding: '10px', borderRadius: 8, border: '1px solid #ddd', width: '100%', marginBottom: 8 }} value={review.first_name} onChange={e => setPendingReviews(prev => prev.map(r => r.id === review.id ? { ...r, first_name: e.target.value } : r))} placeholder="Full name" />
+                      <input style={{ padding: '10px', borderRadius: 8, border: '1px solid #ddd', width: '100%', marginBottom: 8 }} value={review.phone} onChange={e => setPendingReviews(prev => prev.map(r => r.id === review.id ? { ...r, phone: e.target.value } : r))} placeholder="Phone" />
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => handleApproveReview(review.id, { full_name: review.first_name, phone: review.phone })} style={{ padding: '6px 12px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}>✓ Confirm</button>
+                        <button onClick={() => setEditReview(null)} style={{ padding: '6px 12px', background: '#9e9e9e', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 18 }}>{review.first_name}</div>
+                          <div style={{ color: '#666', fontSize: 14, marginTop: 4 }}>{review.phone || 'No phone'}</div>
+                        </div>
+                        <span style={{ background: '#ff9800', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 12, alignSelf: 'flex-start' }}>{review.confidence}%</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                        <button onClick={() => setEditReview(review.id)} style={{ padding: '6px 12px', background: '#2196F3', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✏️ Edit</button>
+                        <button onClick={() => handleApproveReview(review.id, null)} style={{ padding: '6px 12px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✓ Approve</button>
+                        <button onClick={() => handleRejectReview(review.id)} style={{ padding: '6px 12px', background: '#f44336', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}>✕ Reject</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 15 }}>All Members</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16 }}>
           {filtered.map(member => (
-            <div key={member.id} style={cardStyle}>
+            <div key={member.id} style={{ background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(10px)', borderRadius: 16, padding: 20, boxShadow: '0 8px 32px rgba(0,0,0,0.08)', transition: 'transform 0.2s' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <div style={{ fontWeight: 600, fontSize: 18 }}>{member.first_name} {member.last_name}</div>
-                <span style={{ ...typeBadge, background: member.type === 'visitor' ? '#f0ad4e' : '#5cb85c' }}>
-                  {member.type || 'member'}
-                </span>
+                <div style={{ fontWeight: 600, fontSize: 18 }}>{member.first_name}</div>
+                <span style={{ fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 12, color: '#fff', background: member.type === 'visitor' ? '#f0ad4e' : '#5cb85c', textTransform: 'capitalize' }}>{member.type || 'member'}</span>
               </div>
-              <div style={{ color: '#666', fontSize: 14, marginBottom: 12 }}>
-                {member.phone || 'No phone'}
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => handleDelete(member.id)} style={deleteBtn}>🗑️</button>
-                {/* future: edit, view timeline */}
-              </div>
+              <div style={{ color: '#666', fontSize: 14, marginBottom: 12 }}>{member.phone || 'No phone'}</div>
+              <button onClick={() => handleDelete(member.id)} style={{ background: 'transparent', border: '1px solid #f44336', color: '#f44336', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>🗑️ Remove</button>
             </div>
           ))}
         </div>
-
-        {filtered.length === 0 && (
-          <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>
-            No members found. Add your first member above.
-          </div>
-        )}
+        {filtered.length === 0 && pendingReviews.length === 0 && <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>No members yet. Add your first member or scan an attendance sheet.</div>}
       </div>
     </Layout>
   );
 }
-
-// Styles
-const searchStyle = {
-  flex: 1,
-  minWidth: 200,
-  padding: '10px 14px',
-  borderRadius: 12,
-  border: '1px solid #ddd',
-  background: 'rgba(255,255,255,0.8)',
-  backdropFilter: 'blur(5px)',
-  outline: 'none',
-};
-
-const selectStyle = {
-  padding: '10px 14px',
-  borderRadius: 12,
-  border: '1px solid #ddd',
-  background: 'rgba(255,255,255,0.8)',
-  backdropFilter: 'blur(5px)',
-  cursor: 'pointer',
-};
-
-const addButtonStyle = {
-  padding: '10px 18px',
-  background: '#4F46E5',
-  color: 'white',
-  border: 'none',
-  borderRadius: 12,
-  fontWeight: 600,
-  cursor: 'pointer',
-  backdropFilter: 'blur(5px)',
-};
-
-const formContainerStyle = {
-  background: 'rgba(255,255,255,0.7)',
-  backdropFilter: 'blur(10px)',
-  borderRadius: 16,
-  padding: 20,
-  marginBottom: 20,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 10,
-};
-
-const miniInput = {
-  padding: '10px',
-  borderRadius: 8,
-  border: '1px solid #ddd',
-  background: 'rgba(255,255,255,0.9)',
-};
-
-const primaryBtn = {
-  padding: '10px 20px',
-  background: '#4F46E5',
-  color: 'white',
-  border: 'none',
-  borderRadius: 8,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const cardStyle = {
-  background: 'rgba(255,255,255,0.7)',
-  backdropFilter: 'blur(10px)',
-  borderRadius: 16,
-  padding: 20,
-  boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
-  transition: 'transform 0.2s',
-  cursor: 'default',
-};
-
-const typeBadge = {
-  fontSize: 12,
-  fontWeight: 600,
-  padding: '2px 8px',
-  borderRadius: 12,
-  color: '#fff',
-  textTransform: 'capitalize',
-};
-
-const deleteBtn = {
-  background: 'transparent',
-  border: '1px solid #f44336',
-  color: '#f44336',
-  borderRadius: 8,
-  padding: '4px 10px',
-  cursor: 'pointer',
-  fontWeight: 600,
-};
-
-const messageStyle = {
-  background: '#e8f5e9',
-  padding: 10,
-  borderRadius: 12,
-  marginBottom: 15,
-};
