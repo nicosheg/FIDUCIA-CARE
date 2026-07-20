@@ -1,11 +1,11 @@
 {
-  "name": "church-os",
+  "name": "FIDUCIA CARE",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
     "postinstall": "node -e \"require('tesseract.js').createWorker('eng').then(w => w.terminate())\""
   },
   "dependencies": {
