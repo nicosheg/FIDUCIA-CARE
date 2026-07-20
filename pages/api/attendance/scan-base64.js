@@ -17,33 +17,67 @@ export default async function handler(req, res) {
   const programName = program_name || 'GIBEON';
 
   try {
-    // Write base64 image to a temporary file
+    // 1. Decode base64 and write temporary file
+    const cleanBase64 = image_base64.replace(/\s/g, ''); // remove any spaces/newlines
+    const buffer = Buffer.from(cleanBase64, 'base64');
     const tmpDir = '/tmp';
     const tmpFile = path.join(tmpDir, `scan-${Date.now()}.jpg`);
-    const buffer = Buffer.from(image_base64, 'base64');
     fs.writeFileSync(tmpFile, buffer);
 
-    // Run OCR – no custom parameters, default works perfectly
+    // 2. Read the file back into a buffer (safer for Tesseract)
+    const imageBuffer = fs.readFileSync(tmpFile);
+
+    // 3. Run OCR using a buffer (not file path)
     const worker = await Tesseract.createWorker('eng');
-    const { data: { text } } = await worker.recognize(tmpFile);
+    const { data: { text } } = await worker.recognize(imageBuffer);
     await worker.terminate();
 
     // Clean up temp file
     fs.unlinkSync(tmpFile);
 
-    // Parse names from OCR text
-    const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
-    const extractedNames = lines.map(line => {
-      const parts = line.split(/\s+/);
-      if (parts.length === 1) return { first_name: parts[0], last_name: '' };
-      return { first_name: parts[0], last_name: parts.slice(1).join(' ') };
+    // 4. Parse lines and filter out obvious non‑name lines
+    const rawLines = text.split('\n').map(line => line.trim()).filter(Boolean);
+
+    const nameLines = rawLines.filter(line => {
+      // Keep lines that look like a person's name or a phone number
+      // Remove lines that are too short or contain typical header words
+      if (line.length < 3) return false;
+      if (/^(name|date|attendance|section|program|service|total)/i.test(line)) return false;
+      // Keep if it contains at least one letter (likely a name) or is a phone number
+      return /[a-zA-Z]/.test(line) || /^[0-9+\-\s]{8,}$/.test(line);
     });
+
+    // 5. Convert each line to a name object (first_name, last_name)
+    //    If a line contains a phone number, we'll later attach it to the previous name
+    const extractedNames = [];
+    let pendingPhone = null;
+
+    nameLines.forEach(line => {
+      // Check if line is primarily a phone number
+      if (/^[0-9+\-\s]{8,}$/.test(line)) {
+        pendingPhone = line.replace(/\s/g, '');
+      } else {
+        const parts = line.split(/\s+/);
+        const nameObj = {
+          first_name: parts[0],
+          last_name: parts.slice(1).join(' '),
+          phone: pendingPhone || '',   // attach any phone found before this name
+        };
+        extractedNames.push(nameObj);
+        pendingPhone = null; // reset
+      }
+    });
+
+    // If a phone was left at the end, add it to the last name (if any)
+    if (pendingPhone && extractedNames.length > 0) {
+      extractedNames[extractedNames.length - 1].phone = pendingPhone;
+    }
 
     if (extractedNames.length === 0) {
       return res.status(400).json({ error: 'No names detected. Please ensure the photo is clear and contains handwritten names.' });
     }
 
-    // ---------- Database operations (unchanged) ----------
+    // ---------- Database operations (unchanged, but now using extractedNames with possible phones) ----------
     const client = await pool.connect();
 
     const membersRes = await client.query(
@@ -56,20 +90,21 @@ export default async function handler(req, res) {
     const { presentIds, unmatched } = matchNamesToMembers(extractedNames, membersList);
     let newMembersCount = 0;
 
-    for (const fullName of unmatched) {
-      const parts = fullName.split(' ');
-      const firstName = parts[0];
-      const lastName = parts.slice(1).join(' ');
+    for (const nameObj of unmatched) {
+      const firstName = nameObj.first_name;
+      const lastName = nameObj.last_name;
+      const phone = nameObj.phone || '';
       const insertRes = await client.query(
         `INSERT INTO members (church_id, first_name, last_name, phone, status, type)
-         VALUES ($1, $2, $3, '', 'active', 'visitor')
+         VALUES ($1, $2, $3, $4, 'active', 'visitor')
          RETURNING id`,
-        [churchId, firstName, lastName]
+        [churchId, firstName, lastName, phone]
       );
       presentIds.push(insertRes.rows[0].id);
       newMembersCount++;
     }
 
+    // (session and attendance marking code remains identical)
     const today = new Date().toISOString().slice(0, 10);
     let sessionRes = await client.query(
       `SELECT id FROM sessions WHERE church_id = $1 AND name = $2 AND created_at::date = $3`,
