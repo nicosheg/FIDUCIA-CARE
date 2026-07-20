@@ -1,6 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-import Tesseract from 'tesseract.js';
 import pool from '../../../lib/db';
 import { matchNamesToMembers } from '../../../lib/fuzzyMatch';
 
@@ -8,7 +5,6 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
   const { church_id, program_name, image_base64 } = req.body;
-
   if (!image_base64) {
     return res.status(400).json({ error: 'No image data received' });
   }
@@ -17,20 +13,30 @@ export default async function handler(req, res) {
   const programName = program_name || 'GIBEON';
 
   try {
-    // Write base64 to temporary file
-    const tmpDir = '/tmp';
-    const tmpFile = path.join(tmpDir, `scan-${Date.now()}.jpg`);
-    const buffer = Buffer.from(image_base64, 'base64');
-    fs.writeFileSync(tmpFile, buffer);
+    // Call OCR.space free API
+    const ocrRes = await fetch('https://api.ocr.space/parse/image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base64Image: `data:image/jpeg;base64,${image_base64}`,
+        apikey: 'helloworld',      // free public key
+        language: 'eng',
+        isOverlayRequired: false,
+        detectOrientation: true,
+        scale: true,
+        OCREngine: 2,
+      }),
+    });
 
-    // Legacy Tesseract.js API (v2.1.5)
-    const { data: { text } } = await Tesseract.recognize(tmpFile, 'eng');
+    const ocrData = await ocrRes.json();
+    if (ocrData.IsErroredOnProcessing || !ocrData.ParsedResults?.length) {
+      return res.status(400).json({ error: ocrData.ErrorMessage || 'OCR processing failed' });
+    }
 
-    // Clean up
-    fs.unlinkSync(tmpFile);
+    const rawText = ocrData.ParsedResults[0].ParsedText;
 
-    // Parse names
-    const lines = text.split('\n').map(line => line.trim()).filter(Boolean);
+    // Parse names from OCR text (same parsing logic)
+    const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
     const extractedNames = lines.map(line => {
       const parts = line.split(/\s+/);
       if (parts.length === 1) return { first_name: parts[0], last_name: '' };
@@ -41,7 +47,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'No names detected.' });
     }
 
-    // Database operations (unchanged)
+    // Database operations (unchanged – direct pool)
     const client = await pool.connect();
     const membersRes = await client.query(
       `SELECT id, first_name, last_name FROM members WHERE church_id = $1 AND status = 'active'`,
@@ -122,7 +128,7 @@ export default async function handler(req, res) {
       new_members: newMembersCount,
     });
   } catch (error) {
-    console.error('Scan error:', error);
-    return res.status(500).json({ error: error.message || error.toString() });
+    console.error('OCR.space scan error:', error);
+    return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-      }
+    }
