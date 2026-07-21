@@ -32,7 +32,7 @@ Format:
       Authorization: `Bearer ${GROQ_API_KEY}`,
     },
     body: JSON.stringify({
-      model: 'llama3-8b-8192',   // free / cheap Groq model
+      model: 'llama-3.1-8b-instant',   // current Groq model
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: rawText },
@@ -67,7 +67,10 @@ function localFallback(rawText) {
   const isHeader = (str) =>
     /^(name|phone|telephone|attendance|date|program|service|total)$/i.test(str);
 
-  for (const line of lines) {
+  for (let line of lines) {
+    // Clean up slashes / backslashes that break words
+    line = line.replace(/[\\\/]/g, ' ').replace(/\s+/g, ' ').trim();
+
     if (isHeader(line)) continue;
 
     if (isPhoneLike(line) && !/[a-zA-Z]{2,}/.test(line)) {
@@ -84,7 +87,8 @@ function localFallback(rawText) {
       phonePart = phoneMatch[2].replace(/\s/g, '');
     }
 
-    if (namePart.length >= 2 && /[a-zA-Z]{2,}/.test(namePart)) {
+    // More lenient: require only one letter, at least 2 characters
+    if (namePart.length >= 2 && /[a-zA-Z]/.test(namePart)) {
       const phone = phonePart || pendingPhone || '';
       let normalizedPhone = '';
       if (phone) {
@@ -140,9 +144,12 @@ export default async function handler(req, res) {
     // Ensure no null/empty names
     const validPeople = people.filter(p => p.name && p.name.trim().length > 0);
 
+    console.log('Raw OCR text:', rawText);
+    console.log('Corrected people:', validPeople);
+
     return res.status(200).json({ people: validPeople });
   } catch (error) {
     console.error('AI correction error:', error);
     return res.status(500).json({ error: error.message });
   }
-      }
+         }
