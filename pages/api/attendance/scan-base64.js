@@ -15,6 +15,7 @@ export default async function handler(req, res) {
 
   try {
     // 1. OCR via OCR.space (form‑encoded)
+    console.log('Starting OCR...');
     const params = new URLSearchParams();
     params.append('base64Image', `data:image/jpeg;base64,${base64}`);
     params.append('apikey', 'helloworld');
@@ -31,11 +32,13 @@ export default async function handler(req, res) {
     const ocrData = await ocrRes.json();
     if (ocrData.IsErroredOnProcessing || !ocrData.ParsedResults?.length) {
       const errMsg = ocrData.ErrorMessage || 'No parsed results';
+      console.error('OCR failed:', errMsg);
       return res.status(400).json({ error: `OCR failed: ${errMsg}` });
     }
     const rawText = ocrData.ParsedResults[0].ParsedText;
+    console.log('OCR raw text:', rawText);
 
-    // 2. AI correction & structuring (Groq or local fallback)
+    // 2. AI correction & structuring
     const aiRes = await fetch(`${req.headers.origin || 'http://localhost:3000'}/api/ai/correct-scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -43,12 +46,15 @@ export default async function handler(req, res) {
     });
     if (!aiRes.ok) {
       const err = await aiRes.json();
+      console.error('AI correction failed:', err);
       return res.status(500).json({ error: 'AI correction failed: ' + (err.error || 'unknown') });
     }
     const { people } = await aiRes.json();
+    console.log('AI returned', people.length, 'people');
+
     if (!people || people.length === 0) return res.status(400).json({ error: 'No people found.' });
 
-    // 3. Transform & filter – ensure no empty names
+    // 3. Clean & filter
     const validPeople = people
       .filter(p => p.name && p.name.trim().length > 0)
       .map(p => ({
@@ -57,17 +63,23 @@ export default async function handler(req, res) {
         phone: p.phone || '',
         confidence: p.confidence || 70,
       }));
+    console.log('Valid people after filtering:', validPeople.length);
 
-    if (validPeople.length === 0) return res.status(400).json({ error: 'No valid names after filtering.' });
+    if (validPeople.length === 0) {
+      console.log('No valid people after filtering');
+      return res.status(400).json({ error: 'No valid names after filtering.' });
+    }
 
     // 4. Split by confidence
     const highConfidence = validPeople.filter(p => p.confidence >= 90);
     const lowConfidence = validPeople.filter(p => p.confidence < 90);
+    console.log('High confidence:', highConfidence.length, 'Low confidence:', lowConfidence.length);
 
     // 5. Save high‑confidence members + attendance
     const client = await pool.connect();
     let presentIds = [];
     let newMembersCount = 0;
+
     if (highConfidence.length > 0) {
       const membersRes = await client.query(
         `SELECT id, first_name, last_name FROM members WHERE church_id = $1 AND status = 'active'`,
@@ -76,20 +88,27 @@ export default async function handler(req, res) {
       const membersList = membersRes.rows;
       const { presentIds: matched, unmatched } = matchNamesToMembers(highConfidence, membersList);
       presentIds = matched;
+      console.log('Matched existing:', matched.length, 'Unmatched:', unmatched.length);
 
       for (const person of unmatched) {
         const fullName = person.first_name;
-        if (!fullName) continue;
+        if (!fullName) continue; // safety
         const phone = person.phone || '';
-        const insertRes = await client.query(
-          `INSERT INTO members (church_id, first_name, last_name, phone, status, type)
-           VALUES ($1, $2, '', $3, 'active', 'visitor') RETURNING id`,
-          [churchId, fullName, phone]
-        );
-        presentIds.push(insertRes.rows[0].id);
-        newMembersCount++;
+        try {
+          const insertRes = await client.query(
+            `INSERT INTO members (church_id, first_name, last_name, phone, status, type)
+             VALUES ($1, $2, '', $3, 'active', 'visitor') RETURNING id`,
+            [churchId, fullName, phone]
+          );
+          presentIds.push(insertRes.rows[0].id);
+          newMembersCount++;
+        } catch (insertErr) {
+          console.error('Insert error for', fullName, insertErr.message);
+        }
       }
     }
+
+    console.log('Present IDs after insert:', presentIds.length);
 
     // 6. Attendance recording
     const today = new Date().toISOString().slice(0, 10);
@@ -108,11 +127,13 @@ export default async function handler(req, res) {
     } else {
       sessionId = sessionRes.rows[0].id;
     }
+
     const sectionRes = await client.query(
       `SELECT id FROM session_sections WHERE session_id = $1 AND name = 'All'`,
       [sessionId]
     );
     const sectionId = sectionRes.rows[0].id;
+
     for (const memberId of presentIds) {
       await client.query(
         `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
@@ -120,7 +141,11 @@ export default async function handler(req, res) {
         [memberId, today, sectionId]
       );
     }
-    const allActive = await client.query(`SELECT id FROM members WHERE church_id = $1 AND status = 'active'`, [churchId]);
+
+    const allActive = await client.query(
+      `SELECT id FROM members WHERE church_id = $1 AND status = 'active'`,
+      [churchId]
+    );
     const allActiveIds = allActive.rows.map(r => r.id);
     for (const id of allActiveIds) {
       if (!presentIds.includes(id)) {
@@ -131,6 +156,7 @@ export default async function handler(req, res) {
         );
       }
     }
+
     client.release();
 
     // 7. Save low‑confidence entries to pending_reviews
@@ -149,15 +175,17 @@ export default async function handler(req, res) {
       );
     }
 
-    return res.status(200).json({
+    const result = {
       status: 'ok',
       present_count: presentIds.length,
       absent_count: allActiveIds.length - presentIds.length,
       new_members: newMembersCount,
       pending_review: validLow.length,
-    });
+    };
+    console.log('Scan result:', result);
+    return res.status(200).json(result);
   } catch (error) {
     console.error('AI‑corrected scan error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-                  }
+      }
