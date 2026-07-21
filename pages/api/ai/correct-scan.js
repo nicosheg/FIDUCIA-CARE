@@ -1,51 +1,86 @@
-import OpenAI from 'openai';
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   const { rawText } = req.body;
   if (!rawText) return res.status(400).json({ error: 'No text provided' });
 
   try {
-    const systemPrompt = `You are an AI assistant for FIDUCIA CARE, a church management platform.
-Your task is to take raw OCR output from an attendance register photo and return a clean, structured JSON array of people.
+    const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
+    const people = [];
+    let pendingPhone = null;
 
-Rules:
-- The register contains handwritten names and phone numbers, sometimes on the same line, sometimes on separate lines.
-- Extract every person mentioned. If a phone number appears on its own line, attach it to the previous name.
-- Normalize phone numbers to Nigerian format: if it starts with '0', prepend '+234'. If it starts with '234', add '+'. Remove slashes, spaces, and other non-digit characters.
-- Correct obvious OCR mistakes in names (e.g., "BL ERELL" -> likely "Blessing Emelie"). Use common sense and context.
-- **Output the full name as a single string in the "name" field.** Do not split into first/last.
-- For each person, provide a confidence score between 0 and 100 indicating how sure you are about the corrected name.
-- Return ONLY a JSON array, no other text.
+    const isPhoneLike = (str) => {
+      const digits = str.replace(/\D/g, '');
+      return digits.length >= 8;
+    };
 
-Format:
-[
-  {
-    "name": "Sis Blessing Faith",
-    "phone": "+234...",
-    "confidence": 95
-  },
-  ...
-]`;
+    const isHeader = (str) =>
+      /^(name|phone|telephone|attendance|date|program|service|total)$/i.test(str);
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: rawText }
-      ],
-      temperature: 0.2,
-      max_tokens: 2000,
-    });
+    for (const line of lines) {
+      if (isHeader(line)) continue;
 
-    const aiResponse = completion.choices[0].message.content.trim();
-    const cleanJson = aiResponse.replace(/```json|```/g, '').trim();
-    const correctedPeople = JSON.parse(cleanJson);
-    return res.status(200).json({ people: correctedPeople });
+      // If line is mostly a phone number, save it for the next name
+      if (isPhoneLike(line) && !/[a-zA-Z]{2,}/.test(line)) {
+        pendingPhone = line.replace(/\s/g, '');
+        continue;
+      }
+
+      // Try to separate a trailing phone number
+      const phoneMatch = line.match(/(.*?)([0-9+\-\s]{8,})$/);
+      let namePart = line;
+      let phonePart = null;
+
+      if (phoneMatch) {
+        namePart = phoneMatch[1].trim();
+        phonePart = phoneMatch[2].replace(/\s/g, '');
+      }
+
+      // Only keep lines that look like a name (at least 2 letters)
+      if (namePart.length >= 2 && /[a-zA-Z]{2,}/.test(namePart)) {
+        const phone = phonePart || pendingPhone || '';
+        if (phone) {
+          // Normalize Nigerian numbers
+          let normalizedPhone = phone.replace(/[\s\-\/\\|]/g, '');
+          if (normalizedPhone.startsWith('0')) normalizedPhone = '+234' + normalizedPhone.substring(1);
+          if (normalizedPhone.startsWith('234') && !normalizedPhone.startsWith('+')) normalizedPhone = '+' + normalizedPhone;
+          
+          people.push({
+            name: namePart,
+            phone: normalizedPhone,
+            confidence: namePart.length > 5 ? 90 : 80,
+          });
+        } else {
+          // No phone – lower confidence
+          people.push({
+            name: namePart,
+            phone: '',
+            confidence: namePart.length > 7 ? 85 : 75,
+          });
+        }
+        pendingPhone = null;
+      }
+    }
+
+    // If a phone was left hanging at the end, attach to last person
+    if (pendingPhone && people.length > 0) {
+      people[people.length - 1].phone = pendingPhone;
+      people[people.length - 1].confidence = Math.min(people[people.length - 1].confidence + 5, 100);
+    }
+
+    // Remove obvious duplicates
+    const unique = [];
+    const seen = new Set();
+    for (const p of people) {
+      const key = `${p.name}|${p.phone}`;
+      if (!seen.has(key)) {
+        unique.push(p);
+        seen.add(key);
+      }
+    }
+
+    return res.status(200).json({ people: unique });
   } catch (error) {
-    console.error('AI correction error:', error);
+    console.error('Local correction error:', error);
     return res.status(500).json({ error: error.message });
   }
-      }
+          }
