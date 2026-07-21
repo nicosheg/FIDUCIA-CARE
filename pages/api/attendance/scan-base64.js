@@ -35,7 +35,7 @@ export default async function handler(req, res) {
     }
     const rawText = ocrData.ParsedResults[0].ParsedText;
 
-    // 2. AI correction & structuring
+    // 2. AI correction & structuring (Groq or local fallback)
     const aiRes = await fetch(`${req.headers.origin || 'http://localhost:3000'}/api/ai/correct-scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -48,17 +48,21 @@ export default async function handler(req, res) {
     const { people } = await aiRes.json();
     if (!people || people.length === 0) return res.status(400).json({ error: 'No people found.' });
 
-    // 3. Transform to our internal format: first_name = full name, last_name = ''
-    const transformedPeople = people.map(p => ({
-      first_name: p.name,
-      last_name: '',
-      phone: p.phone || '',
-      confidence: p.confidence || 70,
-    }));
+    // 3. Transform & filter – ensure no empty names
+    const validPeople = people
+      .filter(p => p.name && p.name.trim().length > 0)
+      .map(p => ({
+        first_name: p.name.trim(),
+        last_name: '',
+        phone: p.phone || '',
+        confidence: p.confidence || 70,
+      }));
+
+    if (validPeople.length === 0) return res.status(400).json({ error: 'No valid names after filtering.' });
 
     // 4. Split by confidence
-    const highConfidence = transformedPeople.filter(p => p.confidence >= 90);
-    const lowConfidence = transformedPeople.filter(p => p.confidence < 90);
+    const highConfidence = validPeople.filter(p => p.confidence >= 90);
+    const lowConfidence = validPeople.filter(p => p.confidence < 90);
 
     // 5. Save high‑confidence members + attendance
     const client = await pool.connect();
@@ -72,8 +76,10 @@ export default async function handler(req, res) {
       const membersList = membersRes.rows;
       const { presentIds: matched, unmatched } = matchNamesToMembers(highConfidence, membersList);
       presentIds = matched;
+
       for (const person of unmatched) {
-        const fullName = person.first_name;
+        const fullName = person.first_name; // already trimmed & non‑null
+        if (!fullName) continue; // safety
         const phone = person.phone || '';
         const insertRes = await client.query(
           `INSERT INTO members (church_id, first_name, last_name, phone, status, type)
@@ -127,10 +133,11 @@ export default async function handler(req, res) {
     }
     client.release();
 
-    // 7. Save low‑confidence entries to pending_reviews
-    if (lowConfidence.length > 0) {
+    // 7. Save low‑confidence entries to pending_reviews (only valid ones)
+    const validLow = lowConfidence.filter(p => p.first_name?.trim());
+    if (validLow.length > 0) {
       const flatValues = [];
-      const placeholders = lowConfidence.map((p, i) => {
+      const placeholders = validLow.map((p, i) => {
         const base = i * 6 + 1;
         flatValues.push(churchId, sessionId, p.first_name, '', p.phone || '', p.confidence);
         return `($${base}, $${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5})`;
@@ -147,7 +154,7 @@ export default async function handler(req, res) {
       present_count: presentIds.length,
       absent_count: allActiveIds.length - presentIds.length,
       new_members: newMembersCount,
-      pending_review: lowConfidence.length,
+      pending_review: validLow.length,
     });
   } catch (error) {
     console.error('AI‑corrected scan error:', error);
