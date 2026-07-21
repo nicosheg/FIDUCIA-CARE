@@ -18,7 +18,7 @@ export default async function handler(req, res) {
     console.log('Starting OCR...');
     const params = new URLSearchParams();
     params.append('base64Image', `data:image/jpeg;base64,${base64}`);
-    params.append('apikey', 'helloworld');
+    params.append('apikey', process.env.OCR_SPACE_API_KEY || 'helloworld');
     params.append('language', 'eng');
     params.append('isOverlayRequired', 'false');
     params.append('detectOrientation', 'true');
