@@ -78,8 +78,8 @@ export default async function handler(req, res) {
       presentIds = matched;
 
       for (const person of unmatched) {
-        const fullName = person.first_name; // already trimmed & non‑null
-        if (!fullName) continue; // safety
+        const fullName = person.first_name;
+        if (!fullName) continue;
         const phone = person.phone || '';
         const insertRes = await client.query(
           `INSERT INTO members (church_id, first_name, last_name, phone, status, type)
@@ -133,7 +133,7 @@ export default async function handler(req, res) {
     }
     client.release();
 
-    // 7. Save low‑confidence entries to pending_reviews (only valid ones)
+    // 7. Save low‑confidence entries to pending_reviews
     const validLow = lowConfidence.filter(p => p.first_name?.trim());
     if (validLow.length > 0) {
       const flatValues = [];
@@ -160,4 +160,4 @@ export default async function handler(req, res) {
     console.error('AI‑corrected scan error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-}
+                  }
