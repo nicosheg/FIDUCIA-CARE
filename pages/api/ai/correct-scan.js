@@ -2,6 +2,7 @@
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
+// ── Groq caller ──
 async function callGroq(rawText) {
   const systemPrompt = `You are an AI document understanding assistant for FIDUCIA CARE, a church management platform in Nigeria.
 Your input is the raw, messy OCR text from an attendance register. The register has two columns: Names and Phone Numbers.
@@ -51,61 +52,12 @@ Format:
   if (!content) throw new Error('Groq returned empty response');
 
   const clean = content.replace(/```json|```/g, '').trim();
-  let parsed;
-  try {
-    parsed = JSON.parse(clean);
-    if (!Array.isArray(parsed)) throw new Error('Response is not an array');
-  } catch (e) {
-    console.error('Failed to parse Groq response:', clean);
-    throw new Error('Groq response was not valid JSON');
-  }
+  const parsed = JSON.parse(clean);
+  if (!Array.isArray(parsed)) throw new Error('Response is not an array');
   return parsed;
 }
 
-function localFallback(rawText) {
-  // ... (keep the same robust local fallback from before)
-  // I'll include the full code below for completeness.
-}
-
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end();
-  const { rawText } = req.body;
-  if (!rawText) return res.status(400).json({ error: 'No text provided' });
-
-  try {
-    let people = [];
-    let usedGroq = false;
-
-    if (GROQ_API_KEY) {
-      try {
-        people = await callGroq(rawText);
-        usedGroq = true;
-      } catch (groqErr) {
-        console.error('Groq failed, falling back to local:', groqErr.message);
-        people = localFallback(rawText);
-      }
-    } else {
-      people = localFallback(rawText);
-    }
-
-    // Clean bare +234 and short numbers
-    const cleanedPeople = people.filter(p => p.name).map(p => {
-      let phone = p.phone || '';
-      if (phone === '+234' || phone.replace(/\D/g, '').length < 10) phone = '';
-      return { ...p, phone };
-    });
-
-    console.log('Raw OCR text:', rawText);
-    console.log('Corrected people (used Groq:', usedGroq, '):', cleanedPeople);
-
-    return res.status(200).json({ people: cleanedPeople });
-  } catch (error) {
-    console.error('AI correction error:', error);
-    return res.status(500).json({ error: error.message });
-  }
-}
-
-// Include the local fallback function here (same as before)
+// ── Local fallback ──
 function localFallback(rawText) {
   const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
   const people = [];
@@ -170,4 +122,45 @@ function localFallback(rawText) {
     }
   }
   return unique;
+}
+
+// ── API handler ──
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).end();
+  const { rawText } = req.body;
+  if (!rawText) return res.status(400).json({ error: 'No text provided' });
+
+  try {
+    let people = [];
+    let usedGroq = false;
+
+    if (GROQ_API_KEY) {
+      try {
+        people = await callGroq(rawText);
+        usedGroq = true;
+      } catch (groqErr) {
+        console.error('Groq failed, falling back to local:', groqErr.message);
+        people = localFallback(rawText);
       }
+    } else {
+      people = localFallback(rawText);
+    }
+
+    // Clean bare +234 and short phone numbers
+    const cleanedPeople = people
+      .filter(p => p.name && p.name.trim().length > 0)
+      .map(p => {
+        let phone = p.phone || '';
+        if (phone === '+234' || phone.replace(/\D/g, '').length < 10) phone = '';
+        return { ...p, phone };
+      });
+
+    console.log('Raw OCR text:', rawText);
+    console.log('Corrected people (used Groq:', usedGroq, '):', cleanedPeople);
+
+    return res.status(200).json({ people: cleanedPeople });
+  } catch (error) {
+    console.error('AI correction error:', error);
+    return res.status(500).json({ error: error.message || 'Internal error in AI correction' });
+  }
+                              }
