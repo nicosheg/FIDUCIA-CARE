@@ -16,8 +16,8 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 WORKDIR /app
 
-# Force npm to use HTTPS for Git (avoids the SSH error)
-RUN npm config set git-protocol https
+# Tell Git to always use HTTPS instead of SSH
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:"
 
 COPY package.json .
 RUN npm install
