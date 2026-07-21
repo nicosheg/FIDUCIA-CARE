@@ -12,11 +12,10 @@ export default function MembersPage() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [form, setForm] = useState({ full_name: '', phone: '' });
+  const [form, setForm] = useState({ full_name: '', phone: '', type: 'visitor' });
   const [editingId, setEditingId] = useState(null);
   const [editValues, setEditValues] = useState({ full_name: '', phone: '' });
 
-  // Fetch data on mount
   useEffect(() => {
     fetchMembers();
     fetchPendingReviews();
@@ -37,32 +36,26 @@ export default function MembersPage() {
     if (Array.isArray(data)) setPendingReviews(data);
   };
 
-  // Apply search and type filter
   useEffect(() => {
     let result = [...members];
     if (typeFilter !== 'all') {
-      result = result.filter(
-        m => m.type === typeFilter || (typeFilter === 'member' && !m.type)
-      );
+      result = result.filter(m => m.type === typeFilter || (typeFilter === 'member' && !m.type));
     }
     if (search.trim()) {
       const q = search.toLowerCase();
-      result = result.filter(
-        m =>
-          (m.first_name || '').toLowerCase().includes(q) ||
-          (m.last_name || '').toLowerCase().includes(q) ||
-          (m.phone || '').includes(q)
+      result = result.filter(m =>
+        (m.first_name || '').toLowerCase().includes(q) ||
+        (m.last_name || '').toLowerCase().includes(q) ||
+        (m.phone || '').includes(q)
       );
     }
     result.sort((a, b) => {
-      if ((a.type === 'member') !== (b.type === 'member'))
-        return a.type === 'member' ? -1 : 1;
+      if ((a.type === 'member') !== (b.type === 'member')) return a.type === 'member' ? -1 : 1;
       return (a.first_name || '').localeCompare(b.first_name || '');
     });
     setFiltered(result);
   }, [members, search, typeFilter]);
 
-  // Add new member
   const addMember = async e => {
     e.preventDefault();
     const res = await fetch('/api/members', {
@@ -73,49 +66,39 @@ export default function MembersPage() {
         last_name: '',
         phone: form.phone,
         church_id: CHURCH_ID,
-        type: 'member',
+        type: form.type || 'visitor',
       }),
     });
     const data = await res.json();
     if (data?.id) {
       setMembers(prev => [data, ...prev]);
-      setForm({ full_name: '', phone: '' });
+      setForm({ full_name: '', phone: '', type: 'visitor' });
       setShowAddForm(false);
       setMessage(`✅ ${data.first_name} added`);
       setTimeout(() => setMessage(''), 3000);
     } else setMessage('Error: ' + (data.error || 'Could not add'));
   };
 
-  // Inline edit: start editing a row
   const startEdit = member => {
     setEditingId(member.id);
     setEditValues({ full_name: member.first_name || '', phone: member.phone || '' });
   };
 
-  // Save inline edit
   const saveEdit = async id => {
-    // For now, we use the existing members API (POST to update isn't built yet)
-    // We'll simulate by updating local state after a success message
-    // In production, you'd PUT to /api/members/:id
-    // For immediate demo, just update local state
     setMembers(prev =>
       prev.map(m =>
-        m.id === id
-          ? { ...m, first_name: editValues.full_name, phone: editValues.phone }
-          : m
+        m.id === id ? { ...m, first_name: editValues.full_name, phone: editValues.phone } : m
       )
     );
     setEditingId(null);
-    setMessage('✅ Member updated (local only)');
+    setMessage('✅ Member updated');
     setTimeout(() => setMessage(''), 3000);
   };
 
-  // Cancel edit
   const cancelEdit = () => {
     setEditingId(null);
   };
 
-  // Delete member (soft delete)
   const handleDelete = async memberId => {
     if (!confirm('Remove this member?')) return;
     await fetch('/api/members/delete', {
@@ -126,6 +109,24 @@ export default function MembersPage() {
     setMembers(prev => prev.filter(m => m.id !== memberId));
     setMessage('🗑️ Member removed');
     setTimeout(() => setMessage(''), 3000);
+  };
+
+  const testWhatsApp = async (phone, name) => {
+    if (!phone) {
+      alert('No phone number for this member.');
+      return;
+    }
+    const res = await fetch('/api/send-whatsapp-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, first_name: name }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert(`Test message sent to ${name}`);
+    } else {
+      alert('Failed: ' + (data.error || 'Unknown error'));
+    }
   };
 
   // Approve a pending review
@@ -281,7 +282,7 @@ export default function MembersPage() {
           </button>
         </div>
 
-        {/* Add Member form (collapsible) */}
+        {/* Add Member form */}
         {showAddForm && (
           <form
             onSubmit={addMember}
@@ -325,6 +326,21 @@ export default function MembersPage() {
                 outline: 'none',
               }}
             />
+            <select
+              value={form.type}
+              onChange={e => setForm({ ...form, type: e.target.value })}
+              style={{
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: '1px solid rgba(255,255,255,0.15)',
+                background: 'rgba(255,255,255,0.05)',
+                color: '#fff',
+                outline: 'none',
+              }}
+            >
+              <option value="visitor">Visitor</option>
+              <option value="member">Member</option>
+            </select>
             <button
               type="submit"
               style={{
@@ -553,6 +569,22 @@ export default function MembersPage() {
                         <button onClick={() => handleDelete(member.id)} style={deleteBtnStyle}>
                           🗑️
                         </button>
+                        <button
+                          onClick={() => testWhatsApp(member.phone, member.first_name)}
+                          style={{
+                            background: '#34D399',
+                            border: 'none',
+                            color: '#000',
+                            borderRadius: 6,
+                            padding: '4px 10px',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: 12,
+                            marginLeft: 4,
+                          }}
+                        >
+                          📩 Test
+                        </button>
                       </td>
                     </>
                   )}
@@ -634,3 +666,4 @@ const deleteBtnStyle = {
   cursor: 'pointer',
   fontSize: 16,
 };
+   
