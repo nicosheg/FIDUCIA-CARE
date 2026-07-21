@@ -144,12 +144,19 @@ export default async function handler(req, res) {
     // Ensure no null/empty names
     const validPeople = people.filter(p => p.name && p.name.trim().length > 0);
 
-    console.log('Raw OCR text:', rawText);
-    console.log('Corrected people:', validPeople);
+    // Clean bare country codes and very short phone numbers
+    const cleanedPeople = validPeople.map(p => {
+      let phone = p.phone;
+      if (phone === '+234' || phone.length < 10) phone = ''; // remove invalid
+      return { ...p, phone };
+    });
 
-    return res.status(200).json({ people: validPeople });
+    console.log('Raw OCR text:', rawText);
+    console.log('Corrected people:', cleanedPeople);
+
+    return res.status(200).json({ people: cleanedPeople });
   } catch (error) {
     console.error('AI correction error:', error);
     return res.status(500).json({ error: error.message });
   }
-         }
+    }
