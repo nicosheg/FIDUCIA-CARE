@@ -7,6 +7,7 @@ export default function MembersPage() {
   const [members, setMembers] = useState([]);
   const [filtered, setFiltered] = useState([]);
   const [pendingReviews, setPendingReviews] = useState([]);
+  const [selectedReviews, setSelectedReviews] = useState(new Set());
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [message, setMessage] = useState('');
@@ -16,7 +17,6 @@ export default function MembersPage() {
   const [editingId, setEditingId] = useState(null);
   const [editValues, setEditValues] = useState({ full_name: '', phone: '' });
 
-  // Fetch data on mount
   useEffect(() => {
     fetchMembers();
     fetchPendingReviews();
@@ -25,19 +25,18 @@ export default function MembersPage() {
   const fetchMembers = async () => {
     const res = await fetch(`/api/members?church_id=${CHURCH_ID}`);
     const data = await res.json();
-    if (Array.isArray(data)) {
-      setMembers(data);
-      setLoading(false);
-    }
+    if (Array.isArray(data)) { setMembers(data); setLoading(false); }
   };
 
   const fetchPendingReviews = async () => {
     const res = await fetch(`/api/pending-reviews?church_id=${CHURCH_ID}`);
     const data = await res.json();
-    if (Array.isArray(data)) setPendingReviews(data);
+    if (Array.isArray(data)) {
+      setPendingReviews(data);
+      setSelectedReviews(new Set());
+    }
   };
 
-  // Apply search and type filter
   useEffect(() => {
     let result = [...members];
     if (typeFilter !== 'all') {
@@ -57,9 +56,7 @@ export default function MembersPage() {
     });
     setFiltered(result);
   }, [members, search, typeFilter]);
-
-  // Add new member
-  const addMember = async e => {
+    const addMember = async e => {
     e.preventDefault();
     const res = await fetch('/api/members', {
       method: 'POST',
@@ -82,7 +79,6 @@ export default function MembersPage() {
     } else setMessage('Error: ' + (data.error || 'Could not add'));
   };
 
-  // Inline edit
   const startEdit = member => {
     setEditingId(member.id);
     setEditValues({ full_name: member.first_name || '', phone: member.phone || '' });
@@ -103,7 +99,6 @@ export default function MembersPage() {
     setEditingId(null);
   };
 
-  // Delete member (soft delete)
   const handleDelete = async memberId => {
     if (!confirm('Remove this member?')) return;
     await fetch('/api/members/delete', {
@@ -116,7 +111,6 @@ export default function MembersPage() {
     setTimeout(() => setMessage(''), 3000);
   };
 
-  // Test WhatsApp message (now with better feedback)
   const testWhatsApp = async (phone, name) => {
     if (!phone) {
       alert('No phone number for this member.');
@@ -135,7 +129,6 @@ export default function MembersPage() {
     }
   };
 
-  // Approve a pending review
   const handleApproveReview = async (reviewId, corrected) => {
     await fetch('/api/pending-reviews', {
       method: 'POST',
@@ -154,7 +147,6 @@ export default function MembersPage() {
     setTimeout(() => setMessage(''), 3000);
   };
 
-  // Reject a pending review
   const handleRejectReview = async reviewId => {
     await fetch('/api/pending-reviews', {
       method: 'POST',
@@ -166,6 +158,53 @@ export default function MembersPage() {
     setTimeout(() => setMessage(''), 3000);
   };
 
+  // BULK OPERATIONS
+  const toggleSelectReview = (reviewId) => {
+    const newSet = new Set(selectedReviews);
+    if (newSet.has(reviewId)) newSet.delete(reviewId);
+    else newSet.add(reviewId);
+    setSelectedReviews(newSet);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedReviews.size === pendingReviews.length) {
+      setSelectedReviews(new Set());
+    } else {
+      setSelectedReviews(new Set(pendingReviews.map(r => r.id)));
+    }
+  };
+
+  const bulkApprove = async () => {
+    if (selectedReviews.size === 0) return;
+    if (!confirm(`Approve ${selectedReviews.size} selected entries?`)) return;
+    for (const id of selectedReviews) {
+      await fetch('/api/pending-reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'approve' }),
+      });
+    }
+    fetchMembers();
+    fetchPendingReviews();
+    setMessage(`✅ Approved ${selectedReviews.size} entries`);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const bulkReject = async () => {
+    if (selectedReviews.size === 0) return;
+    if (!confirm(`Reject ${selectedReviews.size} selected entries?`)) return;
+    for (const id of selectedReviews) {
+      await fetch('/api/pending-reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'reject' }),
+      });
+    }
+    fetchPendingReviews();
+    setMessage(`❌ Rejected ${selectedReviews.size} entries`);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
   if (loading) {
     return (
       <Layout>
@@ -174,8 +213,7 @@ export default function MembersPage() {
         </div>
       </Layout>
     );
-  }
-
+      }
   return (
     <Layout>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
@@ -185,28 +223,24 @@ export default function MembersPage() {
 
         {/* Pending reviews banner */}
         {pendingReviews.length > 0 && (
-          <div
-            style={{
-              background: 'rgba(255,152,0,0.15)',
-              backdropFilter: 'blur(10px)',
-              border: '1px solid rgba(255,152,0,0.4)',
-              borderRadius: 16,
-              padding: '14px 20px',
-              marginBottom: 24,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              color: '#f0f0f0',
-            }}
-          >
+          <div style={{
+            background: 'rgba(255,152,0,0.15)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,152,0,0.4)',
+            borderRadius: 16,
+            padding: '14px 20px',
+            marginBottom: 24,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            color: '#f0f0f0',
+          }}>
             <span style={{ fontWeight: 600 }}>
               🔍 {pendingReviews.length} names need your review
             </span>
             <button
-              onClick={() =>
-                document.getElementById('reviews-section').scrollIntoView({ behavior: 'smooth' })
-              }
+              onClick={() => document.getElementById('reviews-section').scrollIntoView({ behavior: 'smooth' })}
               style={{
                 marginLeft: 16,
                 padding: '6px 14px',
@@ -216,23 +250,14 @@ export default function MembersPage() {
                 borderRadius: 8,
                 cursor: 'pointer',
                 fontWeight: 600,
-              }}
-            >
+              }}>
               Review Now
             </button>
           </div>
         )}
 
         {/* Controls bar */}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 12,
-            marginBottom: 20,
-            alignItems: 'center',
-          }}
-        >
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 20, alignItems: 'center' }}>
           <input
             type="text"
             placeholder="🔍 Search name or phone"
@@ -261,15 +286,10 @@ export default function MembersPage() {
               backdropFilter: 'blur(5px)',
               color: '#fff',
               cursor: 'pointer',
-            }}
-          >
+            }}>
             <option value="all">All ({members.length})</option>
-            <option value="member">
-              Members ({members.filter(m => m.type === 'member' || !m.type).length})
-            </option>
-            <option value="visitor">
-              Visitors ({members.filter(m => m.type === 'visitor').length})
-            </option>
+            <option value="member">Members ({members.filter(m => m.type === 'member' || !m.type).length})</option>
+            <option value="visitor">Visitors ({members.filter(m => m.type === 'visitor').length})</option>
           </select>
           <button
             onClick={() => setShowAddForm(!showAddForm)}
@@ -282,28 +302,24 @@ export default function MembersPage() {
               fontWeight: 600,
               cursor: 'pointer',
               backdropFilter: 'blur(5px)',
-            }}
-          >
+            }}>
             ➕ Add Member
           </button>
         </div>
 
         {/* Add Member form */}
         {showAddForm && (
-          <form
-            onSubmit={addMember}
-            style={{
-              background: 'rgba(255,255,255,0.03)',
-              backdropFilter: 'blur(10px)',
-              borderRadius: 16,
-              padding: 20,
-              marginBottom: 24,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-              border: '1px solid rgba(255,255,255,0.06)',
-            }}
-          >
+          <form onSubmit={addMember} style={{
+            background: 'rgba(255,255,255,0.03)',
+            backdropFilter: 'blur(10px)',
+            borderRadius: 16,
+            padding: 20,
+            marginBottom: 24,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            border: '1px solid rgba(255,255,255,0.06)',
+          }}>
             <input
               placeholder="Full Name (e.g., Bro Jerry)"
               value={form.full_name}
@@ -342,106 +358,109 @@ export default function MembersPage() {
                 background: 'rgba(255,255,255,0.05)',
                 color: '#fff',
                 outline: 'none',
-              }}
-            >
+              }}>
               <option value="visitor">Visitor</option>
               <option value="member">Member</option>
             </select>
-            <button
-              type="submit"
-              style={{
-                padding: '10px 20px',
-                background: '#4F46E5',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 8,
-                fontWeight: 600,
-                cursor: 'pointer',
-                alignSelf: 'flex-start',
-              }}
-            >
+            <button type="submit" style={{
+              padding: '10px 20px',
+              background: '#4F46E5',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              fontWeight: 600,
+              cursor: 'pointer',
+              alignSelf: 'flex-start',
+            }}>
               Save
             </button>
           </form>
         )}
 
         {message && (
-          <div
-            style={{
-              background: 'rgba(52,211,153,0.15)',
-              padding: 10,
-              borderRadius: 12,
-              marginBottom: 15,
-              color: '#34D399',
-            }}
-          >
+          <div style={{
+            background: 'rgba(52,211,153,0.15)',
+            padding: 10,
+            borderRadius: 12,
+            marginBottom: 15,
+            color: '#34D399',
+          }}>
             {message}
           </div>
         )}
 
-        {/* Pending reviews section */}
+        {/* REVIEW SECTION WITH BULK ACTIONS */}
         {pendingReviews.length > 0 && (
           <div id="reviews-section" style={{ marginBottom: 30 }}>
-            <h2
-              style={{
-                fontSize: 22,
-                fontWeight: 600,
-                marginBottom: 15,
-                color: '#f0f0f0',
-              }}
-            >
-              🔍 Need Review ({pendingReviews.length})
-            </h2>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                gap: 16,
-              }}
-            >
-              {pendingReviews.map(review => (
-                <div
-                  key={review.id}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+              <h2 style={{ fontSize: 22, fontWeight: 600, color: '#f0f0f0' }}>🔍 Need Review ({pendingReviews.length})</h2>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={bulkApprove} disabled={selectedReviews.size === 0}
                   style={{
-                    background: 'rgba(255,255,255,0.03)',
-                    backdropFilter: 'blur(10px)',
-                    borderRadius: 16,
-                    padding: 20,
-                    borderLeft: '4px solid #ff9800',
-                    border: '1px solid rgba(255,255,255,0.06)',
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      marginBottom: 12,
-                    }}
-                  >
+                    padding: '8px 16px',
+                    background: '#34D399',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    opacity: selectedReviews.size === 0 ? 0.5 : 1,
+                  }}>
+                  ✅ Approve Selected ({selectedReviews.size})
+                </button>
+                <button onClick={bulkReject} disabled={selectedReviews.size === 0}
+                  style={{
+                    padding: '8px 16px',
+                    background: '#EF4444',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    opacity: selectedReviews.size === 0 ? 0.5 : 1,
+                  }}>
+                  ❌ Reject Selected ({selectedReviews.size})
+                </button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#ccc', cursor: 'pointer', fontSize: 14 }}>
+                  <input type="checkbox" checked={selectedReviews.size === pendingReviews.length} onChange={toggleSelectAll} />
+                  Select All
+                </label>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+              {pendingReviews.map(review => (
+                <div key={review.id} style={{
+                  background: 'rgba(255,255,255,0.03)',
+                  backdropFilter: 'blur(10px)',
+                  borderRadius: 16,
+                  padding: 20,
+                  borderLeft: '4px solid #ff9800',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  position: 'relative',
+                }}>
+                  <input type="checkbox"
+                    checked={selectedReviews.has(review.id)}
+                    onChange={() => toggleSelectReview(review.id)}
+                    style={{ position: 'absolute', top: 10, right: 10, transform: 'scale(1.3)', cursor: 'pointer' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12, paddingRight: 30 }}>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 18, color: '#f0f0f0' }}>
-                        {review.first_name}
-                      </div>
-                      <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>
-                        {review.phone || 'No phone'}
-                      </div>
+                      <div style={{ fontWeight: 600, fontSize: 18, color: '#f0f0f0' }}>{review.first_name}</div>
+                      <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>{review.phone || 'No phone'}</div>
                     </div>
-                    <span
-                      style={{
-                        background: '#ff9800',
-                        color: '#fff',
-                        padding: '2px 8px',
-                        borderRadius: 12,
-                        fontSize: 12,
-                        alignSelf: 'flex-start',
-                      }}
-                    >
+                    <span style={{
+                      background: '#ff9800',
+                      color: '#fff',
+                      padding: '2px 8px',
+                      borderRadius: 12,
+                      fontSize: 12,
+                      alignSelf: 'flex-start',
+                    }}>
                       {review.confidence}%
                     </span>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      onClick={() => handleApproveReview(review.id, null)}
+                    <button onClick={() => handleApproveReview(review.id, null)}
                       style={{
                         padding: '6px 12px',
                         background: '#34D399',
@@ -451,12 +470,10 @@ export default function MembersPage() {
                         cursor: 'pointer',
                         fontWeight: 600,
                         fontSize: 13,
-                      }}
-                    >
+                      }}>
                       ✓ Approve
                     </button>
-                    <button
-                      onClick={() => handleRejectReview(review.id)}
+                    <button onClick={() => handleRejectReview(review.id)}
                       style={{
                         padding: '6px 12px',
                         background: '#EF4444',
@@ -466,8 +483,7 @@ export default function MembersPage() {
                         cursor: 'pointer',
                         fontWeight: 600,
                         fontSize: 13,
-                      }}
-                    >
+                      }}>
                       ✕ Reject
                     </button>
                   </div>
@@ -478,26 +494,15 @@ export default function MembersPage() {
         )}
 
         {/* Members table */}
-        <h2
-          style={{
-            fontSize: 22,
-            fontWeight: 600,
-            marginBottom: 15,
-            color: '#f0f0f0',
-          }}
-        >
-          All Members
-        </h2>
-        <div
-          style={{
-            background: 'rgba(255,255,255,0.03)',
-            backdropFilter: 'blur(10px)',
-            borderRadius: 16,
-            padding: 20,
-            border: '1px solid rgba(255,255,255,0.06)',
-            overflowX: 'auto',
-          }}
-        >
+        <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 15, color: '#f0f0f0' }}>All Members</h2>
+        <div style={{
+          background: 'rgba(255,255,255,0.03)',
+          backdropFilter: 'blur(10px)',
+          borderRadius: 16,
+          padding: 20,
+          border: '1px solid rgba(255,255,255,0.06)',
+          overflowX: 'auto',
+        }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', color: '#f0f0f0' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.12)' }}>
@@ -510,39 +515,28 @@ export default function MembersPage() {
             </thead>
             <tbody>
               {filtered.map(member => (
-                <tr
-                  key={member.id}
-                  style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
-                >
+                <tr key={member.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                   {editingId === member.id ? (
                     <>
                       <td style={tdStyle}>
                         <input
                           value={editValues.full_name}
-                          onChange={e =>
-                            setEditValues({ ...editValues, full_name: e.target.value })
-                          }
+                          onChange={e => setEditValues({ ...editValues, full_name: e.target.value })}
                           style={editInputStyle}
                         />
                       </td>
                       <td style={tdStyle}>
                         <input
                           value={editValues.phone}
-                          onChange={e =>
-                            setEditValues({ ...editValues, phone: e.target.value })
-                          }
+                          onChange={e => setEditValues({ ...editValues, phone: e.target.value })}
                           style={editInputStyle}
                         />
                       </td>
                       <td style={tdStyle}>{member.type || 'member'}</td>
                       <td style={tdStyle}>{member.status}</td>
                       <td style={tdStyle}>
-                        <button onClick={() => saveEdit(member.id)} style={saveBtnStyle}>
-                          💾
-                        </button>
-                        <button onClick={cancelEdit} style={cancelBtnStyle}>
-                          ✖️
-                        </button>
+                        <button onClick={() => saveEdit(member.id)} style={saveBtnStyle}>💾</button>
+                        <button onClick={cancelEdit} style={cancelBtnStyle}>✖️</button>
                       </td>
                     </>
                   ) : (
@@ -550,31 +544,21 @@ export default function MembersPage() {
                       <td style={tdStyle}>{member.first_name}</td>
                       <td style={tdStyle}>{member.phone || '—'}</td>
                       <td style={tdStyle}>
-                        <span
-                          style={{
-                            padding: '2px 8px',
-                            borderRadius: 12,
-                            fontSize: 12,
-                            fontWeight: 600,
-                            background:
-                              member.type === 'visitor'
-                                ? 'rgba(245,158,11,0.2)'
-                                : 'rgba(52,211,153,0.2)',
-                            color:
-                              member.type === 'visitor' ? '#F59E0B' : '#34D399',
-                          }}
-                        >
+                        <span style={{
+                          padding: '2px 8px',
+                          borderRadius: 12,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          background: member.type === 'visitor' ? 'rgba(245,158,11,0.2)' : 'rgba(52,211,153,0.2)',
+                          color: member.type === 'visitor' ? '#F59E0B' : '#34D399',
+                        }}>
                           {member.type || 'member'}
                         </span>
                       </td>
                       <td style={tdStyle}>{member.status}</td>
                       <td style={tdStyle}>
-                        <button onClick={() => startEdit(member)} style={editBtnStyle}>
-                          ✏️
-                        </button>
-                        <button onClick={() => handleDelete(member.id)} style={deleteBtnStyle}>
-                          🗑️
-                        </button>
+                        <button onClick={() => startEdit(member)} style={editBtnStyle}>✏️</button>
+                        <button onClick={() => handleDelete(member.id)} style={deleteBtnStyle}>🗑️</button>
                         <button
                           onClick={() => testWhatsApp(member.phone, member.first_name)}
                           style={{
@@ -587,8 +571,7 @@ export default function MembersPage() {
                             fontWeight: 600,
                             fontSize: 12,
                             marginLeft: 4,
-                          }}
-                        >
+                          }}>
                           📩 Test
                         </button>
                       </td>
@@ -599,13 +582,7 @@ export default function MembersPage() {
             </tbody>
           </table>
           {filtered.length === 0 && (
-            <div
-              style={{
-                textAlign: 'center',
-                padding: 40,
-                color: 'rgba(255,255,255,0.4)',
-              }}
-            >
+            <div style={{ textAlign: 'center', padding: 40, color: 'rgba(255,255,255,0.4)' }}>
               No members found. Add your first member or scan an attendance sheet.
             </div>
           )}
