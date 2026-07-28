@@ -5,11 +5,34 @@ export default async function handler(req, res) {
   const { phone, first_name } = req.body;
   if (!phone) return res.status(400).json({ error: 'Phone number required' });
 
-  // Use the approved template so it can be delivered even without prior conversation
   try {
-    const messageId = await sendWhatsAppMessage(phone, `Havilah Christian Church\n\nHello ${first_name || 'Beloved'}, this is a test message from FIDUCIA CARE.\n\nIntelligence by FIDUCIA`);
-    return res.status(200).json({ success: true, messageId, detail: `Message accepted by Meta (ID: ${messageId})` });
+    // Use the approved template so it's allowed even for test-number cold sends
+    const response = await fetch(
+      `https://graph.facebook.com/v18.0/${process.env.META_PHONE_NUMBER_ID}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
+        },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp',
+          to: phone.startsWith('+') ? phone.substring(1) : phone,
+          type: 'template',
+          template: {
+            name: 'gebion_thank_you',
+            language: { code: 'en_US' },
+          },
+        }),
+      }
+    );
+    const data = await response.json();
+    if (data.messages) {
+      return res.status(200).json({ success: true, messageId: data.messages[0].id, detail: `Message accepted (ID: ${data.messages[0].id})` });
+    } else {
+      return res.status(500).json({ error: data.error?.message || 'Unknown error' });
+    }
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
-}
+          }
