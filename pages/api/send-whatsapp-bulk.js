@@ -13,11 +13,11 @@ export default async function handler(req, res) {
   const churchId = church_id || 'demo-church';
 
   if (!token || !phoneNumberId) {
-    return res.status(500).json({ error: 'Missing Meta credentials. Add META_ACCESS_TOKEN and META_PHONE_NUMBER_ID in Render.' });
+    return res.status(500).json({ error: 'Missing Meta credentials' });
   }
 
   try {
-    // All active members with a phone number
+    // Get all active members with phone numbers
     const query = `
       SELECT DISTINCT m.id, m.first_name, m.phone
       FROM members m
@@ -34,7 +34,6 @@ export default async function handler(req, res) {
 
     const results = [];
     for (const member of members) {
-      // Meta requires plain digits, no '+'
       const cleanPhone = member.phone.startsWith('+') ? member.phone.substring(1) : member.phone;
 
       try {
@@ -51,16 +50,8 @@ export default async function handler(req, res) {
               to: cleanPhone,
               type: 'template',
               template: {
-                name: 'gebion_thank_you',   // must match your approved template name
+                name: 'gebion_thank_you',   // exact name from screenshot
                 language: { code: 'en_US' },
-                components: [
-                  {
-                    type: 'body',
-                    parameters: [
-                      { type: 'text', text: member.first_name },
-                    ],
-                  },
-                ],
               },
             }),
           }
@@ -70,18 +61,13 @@ export default async function handler(req, res) {
         if (data.messages) {
           results.push({ phone: member.phone, status: 'sent' });
         } else {
-          results.push({
-            phone: member.phone,
-            error: data.error?.message || 'Unknown',
-            status: 'failed',
-          });
+          results.push({ phone: member.phone, error: data.error?.message || 'Unknown', status: 'failed' });
         }
       } catch (err) {
         results.push({ phone: member.phone, error: err.message, status: 'failed' });
       }
 
-      // Safe pace: 1 message every 3‑5 seconds
-      await sleep(3500);
+      await sleep(3500); // 3.5 seconds between sends
     }
 
     const sent = results.filter(r => r.status === 'sent').length;
@@ -92,4 +78,4 @@ export default async function handler(req, res) {
     console.error('Bulk WhatsApp error:', error);
     return res.status(500).json({ error: error.message });
   }
-      }
+  }
