@@ -16,6 +16,7 @@ export default function MembersPage() {
   const [editingId, setEditingId] = useState(null);
   const [editValues, setEditValues] = useState({ full_name: '', phone: '' });
 
+  // Fetch data on mount
   useEffect(() => {
     fetchMembers();
     fetchPendingReviews();
@@ -36,6 +37,7 @@ export default function MembersPage() {
     if (Array.isArray(data)) setPendingReviews(data);
   };
 
+  // Apply search and type filter
   useEffect(() => {
     let result = [...members];
     if (typeFilter !== 'all') {
@@ -56,6 +58,7 @@ export default function MembersPage() {
     setFiltered(result);
   }, [members, search, typeFilter]);
 
+  // Add new member
   const addMember = async e => {
     e.preventDefault();
     const res = await fetch('/api/members', {
@@ -79,6 +82,7 @@ export default function MembersPage() {
     } else setMessage('Error: ' + (data.error || 'Could not add'));
   };
 
+  // Inline edit
   const startEdit = member => {
     setEditingId(member.id);
     setEditValues({ full_name: member.first_name || '', phone: member.phone || '' });
@@ -99,6 +103,7 @@ export default function MembersPage() {
     setEditingId(null);
   };
 
+  // Delete member (soft delete)
   const handleDelete = async memberId => {
     if (!confirm('Remove this member?')) return;
     await fetch('/api/members/delete', {
@@ -111,6 +116,7 @@ export default function MembersPage() {
     setTimeout(() => setMessage(''), 3000);
   };
 
+  // Test WhatsApp message (now with better feedback)
   const testWhatsApp = async (phone, name) => {
     if (!phone) {
       alert('No phone number for this member.');
@@ -123,9 +129,9 @@ export default function MembersPage() {
     });
     const data = await res.json();
     if (data.success) {
-      alert(`Test message sent to ${name}`);
+      alert(`✅ ${data.detail}`);
     } else {
-      alert('Failed: ' + (data.error || 'Unknown error'));
+      alert(`❌ Failed: ${data.error || 'Unknown error'}`);
     }
   };
 
@@ -666,4 +672,3 @@ const deleteBtnStyle = {
   cursor: 'pointer',
   fontSize: 16,
 };
-   
