@@ -10,12 +10,11 @@ export default async function handler(req, res) {
   let base64 = image_base64.replace(/^data:image\/\w+;base64,/, '').replace(/\s/g, '');
   if (base64.length < 100) return res.status(400).json({ error: 'Image too small or corrupted.' });
 
-  const churchId = church_id || 'demo-church';
+  const orgId = church_id || 'demo-org';
   const programName = program_name || 'GIBEON';
 
   try {
-    // 1. OCR
-    console.log('Starting OCR...');
+    // 1. OCR via OCR.space (form‑encoded)
     const params = new URLSearchParams();
     params.append('base64Image', `data:image/jpeg;base64,${base64}`);
     params.append('apikey', process.env.OCR_SPACE_API_KEY || 'helloworld');
@@ -32,12 +31,11 @@ export default async function handler(req, res) {
     const ocrData = await ocrRes.json();
     if (ocrData.IsErroredOnProcessing || !ocrData.ParsedResults?.length) {
       const errMsg = ocrData.ErrorMessage || 'No parsed results';
-      console.error('OCR failed:', errMsg);
       return res.status(400).json({ error: `OCR failed: ${errMsg}` });
     }
     const rawText = ocrData.ParsedResults[0].ParsedText;
 
-    // 2. AI correction
+    // 2. AI correction & structuring
     const aiRes = await fetch(`${req.headers.origin || 'http://localhost:3000'}/api/ai/correct-scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -50,91 +48,60 @@ export default async function handler(req, res) {
     const { people } = await aiRes.json();
     if (!people || people.length === 0) return res.status(400).json({ error: 'No people found.' });
 
-    // 3. Show everything immediately – no filtering out low confidence yet
-    const allPeople = people.map(p => ({
+    // 3. Transform to our internal format
+    const transformed = people.map(p => ({
       first_name: p.name?.trim() || 'Unknown',
       last_name: '',
       phone: p.phone || '',
       confidence: p.confidence || 70,
     }));
 
-    // 4. Insert EVERYBODY (confidence threshold = 0)
+    // 4. Save high-confidence (>=80) directly, low-confidence go to pending_reviews
+    const HIGH_THRESHOLD = 80;
+    const high = transformed.filter(p => p.confidence >= HIGH_THRESHOLD);
+    const low = transformed.filter(p => p.confidence < HIGH_THRESHOLD);
+
     const client = await pool.connect();
     let presentIds = [];
     let newMembersCount = 0;
 
-    const membersRes = await client.query(
-      `SELECT id, first_name, last_name, phone FROM members WHERE church_id = $1 AND status = 'active'`,
-      [churchId]
-    );
-    const membersList = membersRes.rows;
+    if (high.length > 0) {
+      // Fetch existing active people
+      const existingRes = await client.query(
+        `SELECT id, first_name, phone FROM people WHERE organization_id = $1 AND status = 'active'`,
+        [orgId]
+      );
+      const existingList = existingRes.rows;
 
-    for (const person of allPeople) {
-      const fullName = person.first_name;
-      if (!fullName || fullName === 'Unknown') continue;
-      let phone = person.phone || '';
-      let memberId = null;
+      // Use fuzzy matching to find matches (we have matchNamesToMembers that works on people)
+      const { presentIds: matched, unmatched } = matchNamesToMembers(high, existingList);
+      presentIds = matched;
 
-      console.log(`Processing: ${fullName}, phone: ${phone}, confidence: ${person.confidence}`);
-
-      // 1) Check if phone already exists
-      if (phone) {
-        const existing = await client.query(
-          `SELECT id FROM members WHERE church_id = $1 AND phone = $2 LIMIT 1`,
-          [churchId, phone]
-        );
-        if (existing.rows.length > 0) {
-          memberId = existing.rows[0].id;
-          await client.query(`UPDATE members SET first_name = $1, last_name = '' WHERE id = $2`, [fullName, memberId]);
-          console.log(`Updated existing member by phone: ${fullName}`);
-          presentIds.push(memberId);
-          continue;
-        }
-      }
-
-      // 2) Insert new member
-      try {
+      // Insert unmatched as new people
+      for (const person of unmatched) {
+        const firstName = person.first_name;
+        const phone = person.phone || '';
         const insertRes = await client.query(
-          `INSERT INTO members (church_id, first_name, last_name, phone, status, type)
-           VALUES ($1, $2, '', $3, 'active', 'visitor') RETURNING id`,
-          [churchId, fullName, phone]
+          `INSERT INTO people (organization_id, first_name, last_name, phone, type, status)
+           VALUES ($1, $2, '', $3, 'visitor', 'active') RETURNING id`,
+          [orgId, firstName, phone]
         );
-        memberId = insertRes.rows[0].id;
-        console.log(`Inserted ${fullName} with id ${memberId}`);
+        presentIds.push(insertRes.rows[0].id);
         newMembersCount++;
-        presentIds.push(memberId);
-      } catch (err) {
-        console.error(`Insert error for ${fullName}:`, err.message);
-        // Try without phone
-        try {
-          const insertNoPhone = await client.query(
-            `INSERT INTO members (church_id, first_name, last_name, phone, status, type)
-             VALUES ($1, $2, '', '', 'active', 'visitor') RETURNING id`,
-            [churchId, fullName]
-          );
-          memberId = insertNoPhone.rows[0].id;
-          console.log(`Inserted ${fullName} without phone, id ${memberId}`);
-          newMembersCount++;
-          presentIds.push(memberId);
-        } catch (err2) {
-          console.error(`Second insert error for ${fullName}:`, err2.message);
-        }
       }
     }
 
-    console.log('Present IDs after insert:', presentIds.length);
-
-    // 5. Record attendance for all presentIds
+    // 5. Record attendance for all presentIds and log timeline events
     const today = new Date().toISOString().slice(0, 10);
+    let sessionId;
     let sessionRes = await client.query(
       `SELECT id FROM sessions WHERE church_id = $1 AND name = $2 AND created_at::date = $3`,
-      [churchId, programName, today]
+      [orgId, programName, today]
     );
-    let sessionId;
     if (sessionRes.rows.length === 0) {
       const newSession = await client.query(
         `INSERT INTO sessions (church_id, name, status) VALUES ($1, $2, 'active') RETURNING id`,
-        [churchId, programName]
+        [orgId, programName]
       );
       sessionId = newSession.rows[0].id;
       await client.query(`INSERT INTO session_sections (session_id, name) VALUES ($1, 'All')`, [sessionId]);
@@ -147,25 +114,34 @@ export default async function handler(req, res) {
     );
     const sectionId = sectionRes.rows[0].id;
 
-    for (const memberId of presentIds) {
+    for (const personId of presentIds) {
+      // Mark attendance
       await client.query(
         `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
-         VALUES ($1, $2, true, $3) ON CONFLICT (member_id, attendance_date) DO UPDATE SET present = true`,
-        [memberId, today, sectionId]
+         VALUES ($1, $2, true, $3)
+         ON CONFLICT (member_id, attendance_date) DO UPDATE SET present = true`,
+        [personId, today, sectionId]
+      );
+      // Log timeline event
+      await client.query(
+        `INSERT INTO timeline_events (person_id, organization_id, event_type, description, metadata)
+         VALUES ($1, $2, 'attendance', 'Present at ' || $3, '{"program": "' || $3 || '"}')`,
+        [personId, orgId, programName]
       );
     }
 
     // Mark others absent
     const allActive = await client.query(
-      `SELECT id FROM members WHERE church_id = $1 AND status = 'active'`,
-      [churchId]
+      `SELECT id FROM people WHERE organization_id = $1 AND status = 'active'`,
+      [orgId]
     );
     const allActiveIds = allActive.rows.map(r => r.id);
     for (const id of allActiveIds) {
       if (!presentIds.includes(id)) {
         await client.query(
           `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
-           VALUES ($1, $2, false, $3) ON CONFLICT (member_id, attendance_date) DO NOTHING`,
+           VALUES ($1, $2, false, $3)
+           ON CONFLICT (member_id, attendance_date) DO NOTHING`,
           [id, today, sectionId]
         );
       }
@@ -173,17 +149,31 @@ export default async function handler(req, res) {
 
     client.release();
 
-    const result = {
+    // Save low-confidence entries to pending_reviews
+    const validLow = low.filter(p => p.first_name?.trim());
+    if (validLow.length > 0) {
+      const flatValues = [];
+      const placeholders = validLow.map((p, i) => {
+        const base = i * 6 + 1;
+        flatValues.push(orgId, sessionId, p.first_name, '', p.phone || '', p.confidence);
+        return `($${base}, $${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5})`;
+      }).join(', ');
+      await pool.query(
+        `INSERT INTO pending_reviews (church_id, session_id, first_name, last_name, phone, confidence)
+         VALUES ${placeholders}`,
+        flatValues
+      );
+    }
+
+    return res.status(200).json({
       status: 'ok',
       present_count: presentIds.length,
       absent_count: allActiveIds.length - presentIds.length,
       new_members: newMembersCount,
-      people: allPeople, // send back the full list so frontend can display confidence
-    };
-    console.log('Scan result:', result);
-    return res.status(200).json(result);
+      pending_review: validLow.length,
+    });
   } catch (error) {
-    console.error('Scan pipeline error:', error);
+    console.error('Scan error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-      }
+  }
