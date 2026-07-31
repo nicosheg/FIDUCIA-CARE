@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 
-const ORG_ID = 'demo-org';
+const ORG_ID = 'demo-church';
 
 export default function CommunityPage() {
   const [people, setPeople] = useState([]);
