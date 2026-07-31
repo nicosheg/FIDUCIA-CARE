@@ -3,9 +3,10 @@ import { useRouter } from 'next/router';
 
 export default function Layout({ children }) {
   const router = useRouter();
+
   return (
     <>
-      {/* Background gradient – deep navy, slow animation */}
+      {/* Animated background */}
       <div
         style={{
           position: 'fixed',
@@ -19,7 +20,8 @@ export default function Layout({ children }) {
           animation: 'bgShift 20s ease infinite',
         }}
       />
-      {/* Navigation */}
+
+      {/* Top Navigation */}
       <nav
         style={{
           position: 'sticky',
@@ -36,25 +38,25 @@ export default function Layout({ children }) {
         }}
       >
         <Link href="/" style={router.pathname === '/' ? activeLink : link}>
-          <span style={{ marginRight: 6 }}>📊</span> Dashboard
+          📊 Dashboard
         </Link>
         <Link href="/scan" style={router.pathname === '/scan' ? activeLink : link}>
-          <span style={{ marginRight: 6 }}>📷</span> Scan
+          📷 Scan
         </Link>
-        <Link href="/members" style={router.pathname === '/members' ? activeLink : link}>
-          <span style={{ marginRight: 6 }}>👥</span> Members
+        <Link href="/community" style={router.pathname === '/community' ? activeLink : link}>
+          👥 Community
         </Link>
         <Link href="/session" style={router.pathname === '/session' ? activeLink : link}>
-          <span style={{ marginRight: 6 }}>📋</span> Session
+          📋 Session
         </Link>
       </nav>
 
-      {/* Page content */}
+      {/* Page Content */}
       <main style={{ position: 'relative', zIndex: 1, paddingBottom: 80, minHeight: '100vh' }}>
         {children}
       </main>
 
-      {/* Premium footer */}
+      {/* Premium Footer */}
       <footer
         style={{
           position: 'fixed',
@@ -84,7 +86,7 @@ export default function Layout({ children }) {
         }
         body {
           margin: 0;
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
           color: #e0e0e0;
         }
         * {
