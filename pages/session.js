@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Layout from '../components/Layout';
 
-const CHURCH_ID = 'demo-church';
+const CHURCH_ID = 'demo-org';
 
 export default function SessionPage() {
   const router = useRouter();
