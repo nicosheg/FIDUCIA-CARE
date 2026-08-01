@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Layout from '../components/Layout';
 
 const ORG_ID = 'demo-org';
@@ -16,6 +16,12 @@ export default function CommunityPage() {
   const [editingId, setEditingId] = useState(null);
   const [editValues, setEditValues] = useState({ first_name: '', phone: '', type: '' });
   const [showDeleted, setShowDeleted] = useState(false);
+
+  // Selection state
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const longPressTimer = useRef(null);
+  const longPressTarget = useRef(null);
 
   useEffect(() => {
     fetchPeople();
@@ -37,11 +43,10 @@ export default function CommunityPage() {
     if (Array.isArray(data)) setPendingReviews(data);
   };
 
+  // Filtering
   useEffect(() => {
     let result = [...people];
-    if (roleFilter !== 'all') {
-      result = result.filter(p => p.type === roleFilter);
-    }
+    if (roleFilter !== 'all') result = result.filter(p => p.type === roleFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(p =>
@@ -53,6 +58,7 @@ export default function CommunityPage() {
     setFiltered(result);
   }, [people, search, roleFilter]);
 
+  // Add person
   const addPerson = async e => {
     e.preventDefault();
     const res = await fetch('/api/people', {
@@ -70,11 +76,11 @@ export default function CommunityPage() {
     } else setMessage('Error: ' + (data.error || 'Could not add'));
   };
 
+  // Inline edit
   const startEdit = person => {
     setEditingId(person.id);
     setEditValues({ first_name: person.first_name || '', phone: person.phone || '', type: person.type || 'visitor' });
   };
-
   const saveEdit = async id => {
     const res = await fetch('/api/people', {
       method: 'PUT',
@@ -87,14 +93,12 @@ export default function CommunityPage() {
       setEditingId(null);
       setMessage('✅ Updated');
       setTimeout(() => setMessage(''), 3000);
-    } else {
-      setMessage('Error: ' + (data.error || 'Update failed'));
-    }
+    } else setMessage('Error: ' + (data.error || 'Update failed'));
   };
-
   const cancelEdit = () => setEditingId(null);
 
-  const handleDelete = async personId => {
+  // Delete single
+  const handleDeleteSingle = async personId => {
     if (!confirm('Move to trash?')) return;
     await fetch('/api/people/delete', {
       method: 'POST',
@@ -104,6 +108,25 @@ export default function CommunityPage() {
     setPeople(prev => prev.filter(p => p.id !== personId));
   };
 
+  // Bulk delete
+  const bulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Move ${selectedIds.size} selected people to trash?`)) return;
+    for (const id of selectedIds) {
+      await fetch('/api/people/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+    }
+    setPeople(prev => prev.filter(p => !selectedIds.has(p.id)));
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setMessage(`🗑️ Trashed ${selectedIds.size} people`);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  // Restore
   const handleRestore = async personId => {
     await fetch('/api/people/restore', {
       method: 'POST',
@@ -115,12 +138,9 @@ export default function CommunityPage() {
     setTimeout(() => setMessage(''), 3000);
   };
 
+  // Test SMS (unchanged)
   const testSMS = async (phone, name) => {
-    // uses existing test endpoint; same as before
-    if (!phone) {
-      alert('No phone number.');
-      return;
-    }
+    if (!phone) { alert('No phone number.'); return; }
     const res = await fetch('/api/send-whatsapp-test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -131,6 +151,7 @@ export default function CommunityPage() {
     else alert(`❌ ${data.error}`);
   };
 
+  // Review functions (unchanged)
   const handleApproveReview = async (reviewId, corrected) => {
     await fetch('/api/pending-reviews', {
       method: 'POST',
@@ -142,7 +163,6 @@ export default function CommunityPage() {
     setMessage('✅ Approved');
     setTimeout(() => setMessage(''), 3000);
   };
-
   const handleRejectReview = async reviewId => {
     await fetch('/api/pending-reviews', {
       method: 'POST',
@@ -154,6 +174,54 @@ export default function CommunityPage() {
     setTimeout(() => setMessage(''), 3000);
   };
 
+  // ── Long press logic ──
+  const onPointerDown = useCallback((personId) => {
+    longPressTarget.current = personId;
+    longPressTimer.current = setTimeout(() => {
+      // Enter select mode and add this item
+      setSelectMode(true);
+      setSelectedIds(prev => new Set(prev).add(personId));
+      // Vibrate if available (mobile feedback)
+      if (navigator.vibrate) navigator.vibrate(50);
+    }, 2000); // 2‑second hold
+  }, []);
+
+  const onPointerUp = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    longPressTarget.current = null;
+  }, []);
+
+  const onPointerLeave = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  // Toggle selection on normal tap (only if select mode is active)
+  const toggleSelection = (personId) => {
+    if (!selectMode) return;
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(personId)) newSet.delete(personId);
+      else newSet.add(personId);
+      return newSet;
+    });
+  };
+
+  const cancelSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const selectAll = () => {
+    const allIds = filtered.map(p => p.id);
+    setSelectedIds(new Set(allIds));
+  };
+
   if (loading) return <Layout><div style={{padding:20}}><p>Loading community...</p></div></Layout>;
 
   return (
@@ -161,9 +229,30 @@ export default function CommunityPage() {
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
         <h1 style={{ fontSize: 32, fontWeight: 700, color: '#f0f0f0', marginBottom: 25 }}>👥 Community</h1>
 
-        {/* Pending reviews */}
+        {/* Selection mode bar */}
+        {selectMode && (
+          <div style={{
+            position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)',
+            background: '#1f2937', borderRadius: 20, padding: '12px 24px',
+            display: 'flex', gap: 20, alignItems: 'center', zIndex: 1001,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
+          }}>
+            <span style={{ color: '#f0f0f0', fontWeight: 600 }}>{selectedIds.size} selected</span>
+            <button onClick={selectAll} style={barBtn}>☑️ Select All</button>
+            <button onClick={bulkDelete} style={{ ...barBtn, background: '#EF4444' }}>🗑️ Delete</button>
+            <button onClick={cancelSelectMode} style={barBtn}>✕ Cancel</button>
+          </div>
+        )}
+
+        {/* Pending reviews banner */}
         {pendingReviews.length > 0 && (
-          <div style={{ background: 'rgba(255,152,0,0.15)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,152,0,0.4)', borderRadius: 16, padding: '14px 20px', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', color: '#f0f0f0' }}>
+          <div style={{
+            background: 'rgba(255,152,0,0.15)', backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255,152,0,0.4)', borderRadius: 16,
+            padding: '14px 20px', marginBottom: 24,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            flexWrap: 'wrap', color: '#f0f0f0'
+          }}>
             <span style={{ fontWeight: 600 }}>🔍 {pendingReviews.length} names need your review</span>
             <button onClick={() => document.getElementById('reviews-section').scrollIntoView({ behavior: 'smooth' })}
               style={{ marginLeft: 16, padding: '6px 14px', background: '#ff9800', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
@@ -268,7 +357,21 @@ export default function CommunityPage() {
             </thead>
             <tbody>
               {filtered.map(person => (
-                <tr key={person.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <tr
+                  key={person.id}
+                  onPointerDown={() => onPointerDown(person.id)}
+                  onPointerUp={onPointerUp}
+                  onPointerLeave={onPointerLeave}
+                  onClick={() => toggleSelection(person.id)}
+                  style={{
+                    borderBottom: '1px solid rgba(255,255,255,0.06)',
+                    background: selectedIds.has(person.id) ? 'rgba(79,70,229,0.25)' : 'transparent',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none',
+                    transition: 'background 0.2s',
+                  }}
+                >
                   {editingId === person.id ? (
                     <>
                       <td style={td}>
@@ -302,7 +405,7 @@ export default function CommunityPage() {
                         ) : (
                           <>
                             <button onClick={() => startEdit(person)} style={editBtn}>✏️</button>
-                            <button onClick={() => handleDelete(person.id)} style={deleteBtn}>🗑️</button>
+                            <button onClick={() => handleDeleteSingle(person.id)} style={deleteBtn}>🗑️</button>
                             <button onClick={() => testSMS(person.phone, person.first_name)} style={testBtn}>📩 Test</button>
                           </>
                         )}
@@ -329,3 +432,4 @@ const deleteBtn = { background: 'transparent', border: 'none', color: '#EF4444',
 const saveBtn = { background: 'transparent', border: 'none', color: '#34D399', cursor: 'pointer', fontSize: 16, marginRight: 8 };
 const cancelBtn = { background: 'transparent', border: 'none', color: '#EF4444', cursor: 'pointer', fontSize: 16 };
 const testBtn = { background: '#34D399', border: 'none', color: '#000', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 600, fontSize: 12, marginLeft: 4 };
+const barBtn = { background: '#4F46E5', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, cursor: 'pointer', fontSize: 14 };
