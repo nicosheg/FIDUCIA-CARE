@@ -29,7 +29,10 @@ export default function CommunityPage() {
   const fetchPeople = async () => {
     const res = await fetch(`/api/people?organization_id=${ORG_ID}&include_deleted=${showDeleted}`);
     const data = await res.json();
-    if (Array.isArray(data)) { setPeople(data); setLoading(false); }
+    if (Array.isArray(data)) {
+      setPeople(data);
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -46,13 +49,90 @@ export default function CommunityPage() {
     setFiltered(result);
   }, [people, search, roleFilter]);
 
-  const addPerson = async e => { /* same as before, omitted for brevity */ };
-  const startEdit = person => { /* same */ };
-  const saveEdit = async id => { /* same */ };
+  const addPerson = async e => {
+    e.preventDefault();
+    const res = await fetch('/api/people', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...form, organization_id: ORG_ID }),
+    });
+    const data = await res.json();
+    if (data.id) {
+      setPeople(prev => [data, ...prev]);
+      setForm({ first_name: '', last_name: '', phone: '', type: 'visitor' });
+      setShowAddForm(false);
+      setMessage(`✅ ${data.first_name} added`);
+      setTimeout(() => setMessage(''), 3000);
+    } else setMessage('Error: ' + (data.error || 'Could not add'));
+  };
+
+  const startEdit = person => {
+    setEditingId(person.id);
+    setEditValues({ first_name: person.first_name || '', phone: person.phone || '', type: person.type || 'visitor' });
+  };
+
+  const saveEdit = async id => {
+    const res = await fetch('/api/people', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, ...editValues, organization_id: ORG_ID }),
+    });
+    const data = await res.json();
+    if (data.id) {
+      setPeople(prev => prev.map(p => p.id === id ? { ...p, ...editValues } : p));
+      setEditingId(null);
+      setMessage('✅ Updated');
+      setTimeout(() => setMessage(''), 3000);
+    } else setMessage('Error: ' + (data.error || 'Update failed'));
+  };
+
   const cancelEdit = () => setEditingId(null);
-  const handleDeleteSingle = async personId => { /* same */ };
-  const bulkDelete = async () => { /* same, but with toast */ };
-  const handleRestore = async personId => { /* same */ };
+
+  // ----- FIXED SINGLE DELETE -----
+  const handleDeleteSingle = async (personId, e) => {
+    if (e) e.stopPropagation();   // <-- prevents row click / long‑press from interfering
+    if (!confirm('Move to trash?')) return;
+    const res = await fetch('/api/people/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: personId }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setPeople(prev => prev.filter(p => p.id !== personId));
+    } else {
+      alert('Delete failed: ' + (data.error || 'Unknown'));
+    }
+  };
+
+  // ----- FIXED BULK DELETE -----
+  const bulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Move ${selectedIds.size} selected people to trash?`)) return;
+    for (const id of selectedIds) {
+      await fetch('/api/people/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+    }
+    setPeople(prev => prev.filter(p => !selectedIds.has(p.id)));
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setMessage(`🗑️ Trashed ${selectedIds.size} people`);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const handleRestore = async personId => {
+    await fetch('/api/people/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: personId }),
+    });
+    fetchPeople();
+    setMessage('🔄 Restored');
+    setTimeout(() => setMessage(''), 3000);
+  };
 
   // Long press logic (kept)
   const onPointerDown = useCallback((personId) => {
@@ -84,17 +164,24 @@ export default function CommunityPage() {
   const selectAll = () => setSelectedIds(new Set(filtered.map(p => p.id)));
 
   if (loading) return <Layout><div style={{padding:20}}><p>…</p></div></Layout>;
+
   return (
     <Layout>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
         <h1 style={pageTitle}>{people.length} lives remembered</h1>
 
-        {/* Selection mode bar (simplified) */}
+        {/* Selection mode bar */}
         {selectMode && (
           <div style={selectBar}>
-            <span>{selectedIds.size} selected</span>
+            <span style={{ color: '#f0f0f0', fontWeight: 600 }}>{selectedIds.size} selected</span>
             <button onClick={selectAll} style={glassBtn}>Select All</button>
-            <button onClick={bulkDelete} style={{ ...glassBtn, borderColor: '#EF4444' }}>Remove</button>
+            {/* Bulk remove with stopPropagation */}
+            <button
+              onClick={(e) => { e.stopPropagation(); bulkDelete(); }}
+              style={{ ...glassBtn, borderColor: '#EF4444' }}
+            >
+              Remove
+            </button>
             <button onClick={cancelSelectMode} style={glassBtn}>Cancel</button>
           </div>
         )}
@@ -115,7 +202,7 @@ export default function CommunityPage() {
           </button>
         </div>
 
-        {/* Add Person form (glass) */}
+        {/* Add Person form */}
         {showAddForm && (
           <form onSubmit={addPerson} style={formCard}>
             <input placeholder="Full name" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required style={miniInput} />
@@ -130,7 +217,7 @@ export default function CommunityPage() {
 
         {message && <div style={msgStyle}>{message}</div>}
 
-        {/* People cards – Person → Journey → Actions */}
+        {/* People cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
           {filtered.map(person => (
             <div
@@ -150,22 +237,53 @@ export default function CommunityPage() {
                 transition: 'all 0.3s',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
-                {person.type && (
-                  <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37' }}>
-                    {person.type}
-                  </span>
-                )}
-              </div>
-              <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 14 }}>{person.phone || 'No phone'}</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Link href={`/person/${person.id}`} style={actionLink}>Journey →</Link>
-                <button onClick={() => handleDeleteSingle(person.id)} style={actionBtn}>Remove</button>
-              </div>
+              {editingId === person.id ? (
+                // --- editing mode ---
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <input value={editValues.first_name} onChange={e => setEditValues({ ...editValues, first_name: e.target.value })} style={editInput} />
+                  <input value={editValues.phone} onChange={e => setEditValues({ ...editValues, phone: e.target.value })} style={editInput} />
+                  <select value={editValues.type} onChange={e => setEditValues({ ...editValues, type: e.target.value })} style={editInput}>
+                    <option value="visitor">Visitor</option>
+                    <option value="member">Member</option>
+                  </select>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => saveEdit(person.id)} style={glassBtn}>💾 Save</button>
+                    <button onClick={cancelEdit} style={glassBtn}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                // --- normal card ---
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
+                    {person.type && (
+                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37' }}>
+                        {person.type}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 14 }}>{person.phone || 'No phone'}</div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => startEdit(person)} style={actionLink}>✏️ Edit</button>
+                    <Link href={`/person/${person.id}`} style={actionLink}>📋 Journey</Link>
+                    {/* Single remove with stopPropagation */}
+                    <button
+                      onClick={(e) => handleDeleteSingle(person.id, e)}
+                      style={actionBtn}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>
+        {filtered.length === 0 && (
+          <div style={{ textAlign: 'center', padding: 40, color: 'rgba(255,255,255,0.4)' }}>
+            No people found.
+          </div>
+        )}
       </div>
     </Layout>
   );
@@ -202,9 +320,14 @@ const miniInput = {
   background: 'rgba(255,255,255,0.03)', color: '#fff', outline: 'none',
 };
 const msgStyle = { background: 'rgba(52,211,153,0.1)', padding: 10, borderRadius: 12, marginBottom: 15, color: '#34D399' };
+const editInput = {
+  ...miniInput,
+  width: '100%',
+};
 const actionLink = {
   textDecoration: 'none', fontSize: 13, color: '#D4AF37', padding: '4px 10px',
   borderRadius: 8, border: '1px solid rgba(212,175,55,0.2)', background: 'rgba(212,175,55,0.05)',
+  cursor: 'pointer', display: 'inline-block',
 };
 const actionBtn = {
   background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)',
