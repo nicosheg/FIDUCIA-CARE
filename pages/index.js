@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
-  const churchId = 'demo-church';
+  const churchId = 'demo-org';
 
   useEffect(() => {
     fetch(`/api/dashboard?church_id=${churchId}`)
