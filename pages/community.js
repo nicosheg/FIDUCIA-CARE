@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import Layout from '../components/Layout';
 
 const ORG_ID = 'demo-org';
@@ -31,10 +32,7 @@ export default function CommunityPage() {
   const fetchPeople = async () => {
     const res = await fetch(`/api/people?organization_id=${ORG_ID}&include_deleted=${showDeleted}`);
     const data = await res.json();
-    if (Array.isArray(data)) {
-      setPeople(data);
-      setLoading(false);
-    }
+    if (Array.isArray(data)) { setPeople(data); setLoading(false); }
   };
 
   const fetchPendingReviews = async () => {
@@ -43,7 +41,6 @@ export default function CommunityPage() {
     if (Array.isArray(data)) setPendingReviews(data);
   };
 
-  // Filtering
   useEffect(() => {
     let result = [...people];
     if (roleFilter !== 'all') result = result.filter(p => p.type === roleFilter);
@@ -58,7 +55,6 @@ export default function CommunityPage() {
     setFiltered(result);
   }, [people, search, roleFilter]);
 
-  // Add person
   const addPerson = async e => {
     e.preventDefault();
     const res = await fetch('/api/people', {
@@ -75,9 +71,7 @@ export default function CommunityPage() {
       setTimeout(() => setMessage(''), 3000);
     } else setMessage('Error: ' + (data.error || 'Could not add'));
   };
-
-  // Inline edit
-  const startEdit = person => {
+    const startEdit = person => {
     setEditingId(person.id);
     setEditValues({ first_name: person.first_name || '', phone: person.phone || '', type: person.type || 'visitor' });
   };
@@ -97,27 +91,17 @@ export default function CommunityPage() {
   };
   const cancelEdit = () => setEditingId(null);
 
-  // Delete single
   const handleDeleteSingle = async personId => {
     if (!confirm('Move to trash?')) return;
-    await fetch('/api/people/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: personId }),
-    });
+    await fetch('/api/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: personId }) });
     setPeople(prev => prev.filter(p => p.id !== personId));
   };
 
-  // Bulk delete
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`Move ${selectedIds.size} selected people to trash?`)) return;
     for (const id of selectedIds) {
-      await fetch('/api/people/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
+      await fetch('/api/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
     }
     setPeople(prev => prev.filter(p => !selectedIds.has(p.id)));
     setSelectedIds(new Set());
@@ -126,104 +110,67 @@ export default function CommunityPage() {
     setTimeout(() => setMessage(''), 3000);
   };
 
-  // Restore
   const handleRestore = async personId => {
-    await fetch('/api/people/restore', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: personId }),
-    });
+    await fetch('/api/people/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: personId }) });
     fetchPeople();
     setMessage('🔄 Restored');
     setTimeout(() => setMessage(''), 3000);
   };
 
-  // Test SMS (unchanged)
   const testSMS = async (phone, name) => {
     if (!phone) { alert('No phone number.'); return; }
-    const res = await fetch('/api/send-whatsapp-test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone, first_name: name }),
-    });
+    const res = await fetch('/api/send-whatsapp-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, first_name: name }) });
     const data = await res.json();
     if (data.success) alert(`✅ SMS sent (ID: ${data.messageId})`);
     else alert(`❌ ${data.error}`);
   };
 
-  // Review functions (unchanged)
   const handleApproveReview = async (reviewId, corrected) => {
-    await fetch('/api/pending-reviews', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: reviewId, action: 'approve', corrected }),
-    });
+    await fetch('/api/pending-reviews', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: reviewId, action: 'approve', corrected }) });
     fetchPeople();
     fetchPendingReviews();
     setMessage('✅ Approved');
     setTimeout(() => setMessage(''), 3000);
   };
   const handleRejectReview = async reviewId => {
-    await fetch('/api/pending-reviews', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: reviewId, action: 'reject' }),
-    });
+    await fetch('/api/pending-reviews', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: reviewId, action: 'reject' }) });
     fetchPendingReviews();
     setMessage('❌ Rejected');
     setTimeout(() => setMessage(''), 3000);
   };
 
-  // ── Long press logic ──
+  // Long press logic
   const onPointerDown = useCallback((personId) => {
     longPressTarget.current = personId;
     longPressTimer.current = setTimeout(() => {
-      // Enter select mode and add this item
       setSelectMode(true);
       setSelectedIds(prev => new Set(prev).add(personId));
-      // Vibrate if available (mobile feedback)
       if (navigator.vibrate) navigator.vibrate(50);
-    }, 2000); // 2‑second hold
+    }, 2000);
   }, []);
 
   const onPointerUp = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
     longPressTarget.current = null;
   }, []);
 
   const onPointerLeave = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
   }, []);
 
-  // Toggle selection on normal tap (only if select mode is active)
   const toggleSelection = (personId) => {
     if (!selectMode) return;
     setSelectedIds(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(personId)) newSet.delete(personId);
-      else newSet.add(personId);
+      if (newSet.has(personId)) newSet.delete(personId); else newSet.add(personId);
       return newSet;
     });
   };
 
-  const cancelSelectMode = () => {
-    setSelectMode(false);
-    setSelectedIds(new Set());
-  };
-
-  const selectAll = () => {
-    const allIds = filtered.map(p => p.id);
-    setSelectedIds(new Set(allIds));
-  };
+  const cancelSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
+  const selectAll = () => setSelectedIds(new Set(filtered.map(p => p.id)));
 
   if (loading) return <Layout><div style={{padding:20}}><p>Loading community...</p></div></Layout>;
-
   return (
     <Layout>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
@@ -231,12 +178,7 @@ export default function CommunityPage() {
 
         {/* Selection mode bar */}
         {selectMode && (
-          <div style={{
-            position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)',
-            background: '#1f2937', borderRadius: 20, padding: '12px 24px',
-            display: 'flex', gap: 20, alignItems: 'center', zIndex: 1001,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.4)'
-          }}>
+          <div style={selectBar}>
             <span style={{ color: '#f0f0f0', fontWeight: 600 }}>{selectedIds.size} selected</span>
             <button onClick={selectAll} style={barBtn}>☑️ Select All</button>
             <button onClick={bulkDelete} style={{ ...barBtn, background: '#EF4444' }}>🗑️ Delete</button>
@@ -246,16 +188,9 @@ export default function CommunityPage() {
 
         {/* Pending reviews banner */}
         {pendingReviews.length > 0 && (
-          <div style={{
-            background: 'rgba(255,152,0,0.15)', backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255,152,0,0.4)', borderRadius: 16,
-            padding: '14px 20px', marginBottom: 24,
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            flexWrap: 'wrap', color: '#f0f0f0'
-          }}>
+          <div style={reviewBanner}>
             <span style={{ fontWeight: 600 }}>🔍 {pendingReviews.length} names need your review</span>
-            <button onClick={() => document.getElementById('reviews-section').scrollIntoView({ behavior: 'smooth' })}
-              style={{ marginLeft: 16, padding: '6px 14px', background: '#ff9800', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
+            <button onClick={() => document.getElementById('reviews-section').scrollIntoView({ behavior: 'smooth' })} style={reviewBtn}>
               Review Now
             </button>
           </div>
@@ -263,10 +198,8 @@ export default function CommunityPage() {
 
         {/* Controls */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 20, alignItems: 'center' }}>
-          <input type="text" placeholder="🔍 Search name or phone" value={search} onChange={e => setSearch(e.target.value)}
-            style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', backdropFilter: 'blur(5px)', color: '#fff', outline: 'none' }} />
-          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
-            style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', backdropFilter: 'blur(5px)', color: '#fff', cursor: 'pointer' }}>
+          <input type="text" placeholder="🔍 Search name or phone" value={search} onChange={e => setSearch(e.target.value)} style={searchStyle} />
+          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={selectStyle}>
             <option value="all">All</option>
             <option value="visitor">Visitor</option>
             <option value="member">Member</option>
@@ -274,23 +207,21 @@ export default function CommunityPage() {
             <option value="leader">Leader</option>
             <option value="staff">Staff</option>
           </select>
-          <button onClick={() => setShowDeleted(!showDeleted)}
-            style={{ padding: '10px 18px', background: showDeleted ? '#f44336' : '#4CAF50', color: 'white', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer' }}>
+          <button onClick={() => setShowDeleted(!showDeleted)} style={{ padding: '10px 18px', background: showDeleted ? '#f44336' : '#4CAF50', color: 'white', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer' }}>
             {showDeleted ? '📋 Active' : '🗑️ Trash'}
           </button>
-          <button onClick={() => setShowAddForm(!showAddForm)}
-            style={{ padding: '10px 18px', background: '#4F46E5', color: 'white', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer' }}>
+          <button onClick={() => setShowAddForm(!showAddForm)} style={{ padding: '10px 18px', background: '#4F46E5', color: 'white', border: 'none', borderRadius: 12, fontWeight: 600, cursor: 'pointer' }}>
             ➕ Add Person
           </button>
         </div>
 
         {/* Add form */}
         {showAddForm && (
-          <form onSubmit={addPerson} style={{ background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(10px)', borderRadius: 16, padding: 20, marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
-            <input placeholder="First Name" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required style={inputField} />
-            <input placeholder="Last Name" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} style={inputField} />
-            <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required style={inputField} />
-            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={inputField}>
+          <form onSubmit={addPerson} style={formCard}>
+            <input placeholder="First Name" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required style={miniInput} />
+            <input placeholder="Last Name" value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} style={miniInput} />
+            <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required style={miniInput} />
+            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={miniInput}>
               <option value="visitor">Visitor</option>
               <option value="member">Member</option>
               <option value="volunteer">Volunteer</option>
@@ -301,41 +232,31 @@ export default function CommunityPage() {
           </form>
         )}
 
-        {message && <div style={{ background: 'rgba(52,211,153,0.15)', padding: 10, borderRadius: 12, marginBottom: 15, color: '#34D399' }}>{message}</div>}
+        {message && <div style={msgStyle}>{message}</div>}
 
-        {/* Review Section (bulk) */}
+        {/* Review Section */}
         {pendingReviews.length > 0 && (
           <div id="reviews-section" style={{ marginBottom: 30 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
               <h2 style={{ fontSize: 22, fontWeight: 600, color: '#f0f0f0' }}>🔍 Need Review ({pendingReviews.length})</h2>
               <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => {
-                  const allIds = pendingReviews.map(r => r.id);
-                  Promise.all(allIds.map(id => handleApproveReview(id))).then(() => { fetchPeople(); fetchPendingReviews(); });
-                }} style={{ padding: '8px 16px', background: '#34D399', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
-                  ✅ Approve All
-                </button>
-                <button onClick={() => {
-                  const allIds = pendingReviews.map(r => r.id);
-                  Promise.all(allIds.map(id => handleRejectReview(id))).then(() => fetchPendingReviews());
-                }} style={{ padding: '8px 16px', background: '#EF4444', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 }}>
-                  ❌ Reject All
-                </button>
+                <button onClick={() => { const allIds = pendingReviews.map(r => r.id); Promise.all(allIds.map(id => handleApproveReview(id))).then(() => { fetchPeople(); fetchPendingReviews(); }); }} style={approveBtn}>✅ Approve All</button>
+                <button onClick={() => { const allIds = pendingReviews.map(r => r.id); Promise.all(allIds.map(id => handleRejectReview(id))).then(() => fetchPendingReviews()); }} style={rejectBtn}>❌ Reject All</button>
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
               {pendingReviews.map(review => (
-                <div key={review.id} style={{ background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(10px)', borderRadius: 16, padding: 20, borderLeft: '4px solid #ff9800', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div key={review.id} style={reviewCard}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 18, color: '#f0f0f0' }}>{review.first_name}</div>
                       <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>{review.phone || 'No phone'}</div>
                     </div>
-                    <span style={{ background: '#ff9800', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 12 }}>{review.confidence}%</span>
+                    <span style={{ background: '#D4AF37', color: '#0A1128', padding: '2px 8px', borderRadius: 12, fontSize: 12 }}>{review.confidence}%</span>
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => handleApproveReview(review.id)} style={{ padding: '6px 12px', background: '#34D399', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>✓ Approve</button>
-                    <button onClick={() => handleRejectReview(review.id)} style={{ padding: '6px 12px', background: '#EF4444', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>✕ Reject</button>
+                    <button onClick={() => handleApproveReview(review.id)} style={smallGreen}>✓ Approve</button>
+                    <button onClick={() => handleRejectReview(review.id)} style={smallRed}>✕ Reject</button>
                   </div>
                 </div>
               ))}
@@ -343,93 +264,61 @@ export default function CommunityPage() {
           </div>
         )}
 
-        {/* People table */}
+        {/* People cards */}
         <h2 style={{ fontSize: 22, fontWeight: 600, marginBottom: 15, color: '#f0f0f0' }}>{showDeleted ? 'Trash' : 'All People'} ({filtered.length})</h2>
-        <div style={{ background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(10px)', borderRadius: 16, padding: 20, border: '1px solid rgba(255,255,255,0.06)', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', color: '#f0f0f0' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.12)' }}>
-                <th style={th}>Name</th>
-                <th style={th}>Phone</th>
-                <th style={th}>Role</th>
-                <th style={th}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(person => (
-                <tr
-                  key={person.id}
-                  onPointerDown={() => onPointerDown(person.id)}
-                  onPointerUp={onPointerUp}
-                  onPointerLeave={onPointerLeave}
-                  onClick={() => toggleSelection(person.id)}
-                  style={{
-                    borderBottom: '1px solid rgba(255,255,255,0.06)',
-                    background: selectedIds.has(person.id) ? 'rgba(79,70,229,0.25)' : 'transparent',
-                    cursor: 'pointer',
-                    userSelect: 'none',
-                    WebkitUserSelect: 'none',
-                    transition: 'background 0.2s',
-                  }}
-                >
-                  {editingId === person.id ? (
-                    <>
-                      <td style={td}>
-                        <input value={editValues.first_name} onChange={e => setEditValues({ ...editValues, first_name: e.target.value })} style={editInput} />
-                      </td>
-                      <td style={td}>
-                        <input value={editValues.phone} onChange={e => setEditValues({ ...editValues, phone: e.target.value })} style={editInput} />
-                      </td>
-                      <td style={td}>
-                        <select value={editValues.type} onChange={e => setEditValues({ ...editValues, type: e.target.value })} style={editInput}>
-                          <option value="visitor">Visitor</option>
-                          <option value="member">Member</option>
-                          <option value="volunteer">Volunteer</option>
-                          <option value="leader">Leader</option>
-                          <option value="staff">Staff</option>
-                        </select>
-                      </td>
-                      <td style={td}>
-                        <button onClick={() => saveEdit(person.id)} style={saveBtn}>💾</button>
-                        <button onClick={cancelEdit} style={cancelBtn}>✖️</button>
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td style={td}>{person.first_name} {person.last_name}</td>
-                      <td style={td}>{person.phone || '—'}</td>
-                      <td style={td}>{person.type || 'visitor'}</td>
-                      <td style={td}>
-                        {showDeleted ? (
-                          <button onClick={() => handleRestore(person.id)} style={{ background: '#4CAF50', border: 'none', color: '#fff', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 600 }}>🔄 Restore</button>
-                        ) : (
-                          <>
-                            <button onClick={() => startEdit(person)} style={editBtn}>✏️</button>
-                            <button onClick={() => handleDeleteSingle(person.id)} style={deleteBtn}>🗑️</button>
-                            <button onClick={() => testSMS(person.phone, person.first_name)} style={testBtn}>📩 Test</button>
-                          </>
-                        )}
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+          {filtered.map(person => (
+            <div
+              key={person.id}
+              onPointerDown={() => onPointerDown(person.id)}
+              onPointerUp={onPointerUp}
+              onPointerLeave={onPointerLeave}
+              onClick={() => toggleSelection(person.id)}
+              style={{
+                background: selectedIds.has(person.id) ? 'rgba(212,175,55,0.15)' : 'rgba(255,255,255,0.03)',
+                backdropFilter: 'blur(10px)',
+                borderRadius: 16,
+                padding: 20,
+                border: selectedIds.has(person.id) ? '1px solid #D4AF37' : '1px solid rgba(255,255,255,0.06)',
+                cursor: 'pointer',
+                userSelect: 'none',
+                transition: 'all 0.2s',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ fontWeight: 600, fontSize: 18, color: '#f0f0f0' }}>{person.first_name} {person.last_name}</div>
+                <span style={{ fontSize: 12, fontWeight: 600, padding: '2px 8px', borderRadius: 12, background: person.type === 'visitor' ? 'rgba(212,175,55,0.2)' : 'rgba(52,211,153,0.2)', color: person.type === 'visitor' ? '#D4AF37' : '#34D399' }}>
+                  {person.type || 'visitor'}
+                </span>
+              </div>
+              <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, marginBottom: 12 }}>{person.phone || '—'}</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => startEdit(person)} style={iconBtn}>✏️</button>
+                <button onClick={() => handleDeleteSingle(person.id)} style={iconBtn}>🗑️</button>
+                <button onClick={() => testSMS(person.phone, person.first_name)} style={{ ...iconBtn, color: '#34D399' }}>📩 Test</button>
+                <Link href={`/person/${person.id}`} style={{ ...iconBtn, color: '#60A5FA' }}>📋</Link>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </Layout>
   );
 }
 
-// styles
-const th = { padding: '12px 10px', textAlign: 'left', fontWeight: 600, color: 'rgba(255,255,255,0.7)', fontSize: 14 };
-const td = { padding: '10px 10px', fontSize: 14 };
-const inputField = { padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: '#fff', outline: 'none' };
-const editInput = { width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.05)', color: '#fff' };
-const editBtn = { background: 'transparent', border: 'none', color: '#60A5FA', cursor: 'pointer', fontSize: 16, marginRight: 8 };
-const deleteBtn = { background: 'transparent', border: 'none', color: '#EF4444', cursor: 'pointer', fontSize: 16, marginRight: 8 };
-const saveBtn = { background: 'transparent', border: 'none', color: '#34D399', cursor: 'pointer', fontSize: 16, marginRight: 8 };
-const cancelBtn = { background: 'transparent', border: 'none', color: '#EF4444', cursor: 'pointer', fontSize: 16 };
-const testBtn = { background: '#34D399', border: 'none', color: '#000', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 600, fontSize: 12, marginLeft: 4 };
+// Styles for community page (place after component)
+const searchStyle = { flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: '#fff', outline: 'none' };
+const selectStyle = { padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: '#fff', cursor: 'pointer' };
+const selectBar = { position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)', background: '#1f2937', borderRadius: 20, padding: '12px 24px', display: 'flex', gap: 20, alignItems: 'center', zIndex: 1001, boxShadow: '0 8px 24px rgba(0,0,0,0.4)' };
 const barBtn = { background: '#4F46E5', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, cursor: 'pointer', fontSize: 14 };
+const reviewBanner = { background: 'rgba(212,175,55,0.1)', backdropFilter: 'blur(10px)', border: '1px solid rgba(212,175,55,0.3)', borderRadius: 16, padding: '14px 20px', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', color: '#f0f0f0' };
+const reviewBtn = { marginLeft: 16, padding: '6px 14px', background: '#D4AF37', color: '#0A1128', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 };
+const formCard = { background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(10px)', borderRadius: 16, padding: 20, marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 12, border: '1px solid rgba(255,255,255,0.06)' };
+const miniInput = { padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.05)', color: '#fff', outline: 'none' };
+const msgStyle = { background: 'rgba(52,211,153,0.15)', padding: 10, borderRadius: 12, marginBottom: 15, color: '#34D399' };
+const approveBtn = { padding: '8px 16px', background: '#34D399', color: '#000', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 };
+const rejectBtn = { padding: '8px 16px', background: '#EF4444', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontWeight: 600 };
+const reviewCard = { background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(10px)', borderRadius: 16, padding: 20, borderLeft: '4px solid #D4AF37', border: '1px solid rgba(255,255,255,0.06)' };
+const smallGreen = { padding: '6px 12px', background: '#34D399', color: '#000', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 };
+const smallRed = { padding: '6px 12px', background: '#EF4444', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600 };
+const iconBtn = { background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', fontSize: 16, marginRight: 8 };
