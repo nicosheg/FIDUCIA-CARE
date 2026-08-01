@@ -28,8 +28,8 @@ export default function ScanPage() {
       img.src = objectUrl;
       img.onload = () => {
         URL.revokeObjectURL(objectUrl);
-        const MAX_WIDTH = 600;
-        const MAX_HEIGHT = 600;
+        const MAX_WIDTH = 400;          // smaller = faster upload
+        const MAX_HEIGHT = 400;
         let width = img.width;
         let height = img.height;
         if (width > MAX_WIDTH) {
@@ -45,18 +45,22 @@ export default function ScanPage() {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
-        canvas.toBlob((blob) => {
-          if (!blob) { reject(new Error('Canvas toBlob failed')); return; }
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64 = reader.result.split(',')[1];
-            canvas.width = 0;
-            canvas.height = 0;
-            resolve(base64);
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        }, 'image/jpeg', 0.5);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) { reject(new Error('Canvas toBlob failed')); return; }
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const base64 = reader.result.split(',')[1];
+              canvas.width = 0;
+              canvas.height = 0;
+              resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          },
+          'image/jpeg',
+          0.4           // lower quality = smaller payload
+        );
       };
       img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Image loading failed')); };
     });
@@ -67,7 +71,7 @@ export default function ScanPage() {
     if (!file) return;
     e.target.value = null;
 
-    updateState({ status: 'processing', message: 'Optimising image...' });
+    updateState({ status: 'processing', message: 'Reading register...' });
     setScanningLine(true);
     try {
       const base64 = await fileToBase64(file);
@@ -90,6 +94,11 @@ export default function ScanPage() {
           status: 'success',
           message: `✅ Scan complete! ${data.present_count} present (${data.new_members} new).`,
         });
+        // Auto‑redirect to Community after 2 seconds
+        setTimeout(() => {
+          clearScanState();
+          router.push('/community');
+        }, 2000);
       } else {
         updateState({
           status: 'error',
@@ -118,7 +127,9 @@ export default function ScanPage() {
         {scanState.status === 'idle' && (
           <>
             <div style={{ marginBottom: 25 }}>
-              <label style={labelStyle}>Program / Event Name</label>
+              <label style={{ fontWeight: 600, display: 'block', marginBottom: 8, color: '#f0f0f0' }}>
+                Program / Event Name
+              </label>
               <input
                 type="text"
                 value={programName}
@@ -147,7 +158,6 @@ export default function ScanPage() {
 
         {scanState.status !== 'idle' && (
           <div style={resultCard}>
-            {/* Scanning animation */}
             {scanningLine && (
               <div style={scanLineContainer}>
                 <div style={scanLine} />
@@ -203,10 +213,9 @@ export default function ScanPage() {
   );
 }
 
-// Local styles for scan page (place after component)
+// Styles
 const heading = { fontSize: 28, fontWeight: 700, color: '#f0f0f0', marginBottom: 8 };
 const subheading = { color: 'rgba(255,255,255,0.6)', marginBottom: 25 };
-const labelStyle = { fontWeight: 600, display: 'block', marginBottom: 8, color: '#f0f0f0' };
 const inputStyle = {
   padding: '12px 16px', fontSize: 16, borderRadius: 12,
   border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)',
