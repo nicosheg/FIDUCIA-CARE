@@ -88,53 +88,78 @@ export default function CommunityPage() {
 
   const cancelEdit = () => setEditingId(null);
 
-  // ----- FIXED SINGLE DELETE -----
+  // ----- OPTIMISTIC DELETE (single) -----
   const handleDeleteSingle = async (personId, e) => {
-    if (e) e.stopPropagation();   // <-- prevents row click / long‑press from interfering
+    if (e) e.stopPropagation();
     if (!confirm('Move to trash?')) return;
-    const res = await fetch('/api/people/delete', {
+
+    // Remove from UI instantly
+    const backup = people.find(p => p.id === personId);
+    setPeople(prev => prev.filter(p => p.id !== personId));
+
+    try {
+      const res = await fetch('/api/people/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: personId }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        // Restore if API failed
+        setPeople(prev => [...prev, backup]);
+        alert('Delete failed: ' + (data.error || 'Unknown'));
+      }
+    } catch (err) {
+      // Network error – restore
+      setPeople(prev => [...prev, backup]);
+      alert('Network error – person not deleted.');
+    }
+  };
+
+  // ----- OPTIMISTIC BULK DELETE -----
+  const bulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Move ${selectedIds.size} selected people to trash?`)) return;
+
+    // Backup for rollback
+    const backup = people.filter(p => selectedIds.has(p.id));
+    setPeople(prev => prev.filter(p => !selectedIds.has(p.id)));
+    setSelectedIds(new Set());
+    setSelectMode(false);
+
+    for (const id of selectedIds) {
+      try {
+        await fetch('/api/people/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+      } catch (err) {
+        // Rollback all on any error – you can also do per‑item
+        setPeople(prev => [...backup, ...prev]);
+        alert('One or more deletes failed. Rolled back.');
+        break;
+      }
+    }
+    setMessage(`🗑️ Trashed ${selectedIds.size} people`);
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const handleRestore = async personId => {
+    const res = await fetch('/api/people/restore', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: personId }),
     });
     const data = await res.json();
     if (data.success) {
-      setPeople(prev => prev.filter(p => p.id !== personId));
-    } else {
-      alert('Delete failed: ' + (data.error || 'Unknown'));
+      fetchPeople();
+      setMessage('🔄 Restored');
+      setTimeout(() => setMessage(''), 3000);
     }
   };
 
-  // ----- FIXED BULK DELETE -----
-  const bulkDelete = async () => {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`Move ${selectedIds.size} selected people to trash?`)) return;
-    for (const id of selectedIds) {
-      await fetch('/api/people/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-    }
-    setPeople(prev => prev.filter(p => !selectedIds.has(p.id)));
-    setSelectedIds(new Set());
-    setSelectMode(false);
-    setMessage(`🗑️ Trashed ${selectedIds.size} people`);
-    setTimeout(() => setMessage(''), 3000);
-  };
-
-  const handleRestore = async personId => {
-    await fetch('/api/people/restore', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: personId }),
-    });
-    fetchPeople();
-    setMessage('🔄 Restored');
-    setTimeout(() => setMessage(''), 3000);
-  };
-
-  // Long press logic (kept)
+  // Long press logic
   const onPointerDown = useCallback((personId) => {
     longPressTimer.current = setTimeout(() => {
       setSelectMode(true);
@@ -170,23 +195,17 @@ export default function CommunityPage() {
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
         <h1 style={pageTitle}>{people.length} lives remembered</h1>
 
-        {/* Selection mode bar */}
         {selectMode && (
           <div style={selectBar}>
             <span style={{ color: '#f0f0f0', fontWeight: 600 }}>{selectedIds.size} selected</span>
             <button onClick={selectAll} style={glassBtn}>Select All</button>
-            {/* Bulk remove with stopPropagation */}
-            <button
-              onClick={(e) => { e.stopPropagation(); bulkDelete(); }}
-              style={{ ...glassBtn, borderColor: '#EF4444' }}
-            >
+            <button onClick={(e) => { e.stopPropagation(); bulkDelete(); }} style={{ ...glassBtn, borderColor: '#EF4444' }}>
               Remove
             </button>
             <button onClick={cancelSelectMode} style={glassBtn}>Cancel</button>
           </div>
         )}
 
-        {/* Controls */}
         <div style={controlsRow}>
           <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)} style={searchStyle} />
           <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={selectStyle}>
@@ -202,7 +221,6 @@ export default function CommunityPage() {
           </button>
         </div>
 
-        {/* Add Person form */}
         {showAddForm && (
           <form onSubmit={addPerson} style={formCard}>
             <input placeholder="Full name" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required style={miniInput} />
@@ -217,7 +235,6 @@ export default function CommunityPage() {
 
         {message && <div style={msgStyle}>{message}</div>}
 
-        {/* People cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
           {filtered.map(person => (
             <div
@@ -238,7 +255,6 @@ export default function CommunityPage() {
               }}
             >
               {editingId === person.id ? (
-                // --- editing mode ---
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <input value={editValues.first_name} onChange={e => setEditValues({ ...editValues, first_name: e.target.value })} style={editInput} />
                   <input value={editValues.phone} onChange={e => setEditValues({ ...editValues, phone: e.target.value })} style={editInput} />
@@ -252,7 +268,6 @@ export default function CommunityPage() {
                   </div>
                 </div>
               ) : (
-                // --- normal card ---
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
@@ -266,11 +281,7 @@ export default function CommunityPage() {
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={() => startEdit(person)} style={actionLink}>✏️ Edit</button>
                     <Link href={`/person/${person.id}`} style={actionLink}>📋 Journey</Link>
-                    {/* Single remove with stopPropagation */}
-                    <button
-                      onClick={(e) => handleDeleteSingle(person.id, e)}
-                      style={actionBtn}
-                    >
+                    <button onClick={(e) => handleDeleteSingle(person.id, e)} style={actionBtn}>
                       Remove
                     </button>
                   </div>
@@ -289,7 +300,7 @@ export default function CommunityPage() {
   );
 }
 
-// Styles
+// Styles (same as before)
 const pageTitle = { fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 25 };
 const selectBar = {
   position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
@@ -320,10 +331,7 @@ const miniInput = {
   background: 'rgba(255,255,255,0.03)', color: '#fff', outline: 'none',
 };
 const msgStyle = { background: 'rgba(52,211,153,0.1)', padding: 10, borderRadius: 12, marginBottom: 15, color: '#34D399' };
-const editInput = {
-  ...miniInput,
-  width: '100%',
-};
+const editInput = { ...miniInput, width: '100%' };
 const actionLink = {
   textDecoration: 'none', fontSize: 13, color: '#D4AF37', padding: '4px 10px',
   borderRadius: 8, border: '1px solid rgba(212,175,55,0.2)', background: 'rgba(212,175,55,0.05)',
