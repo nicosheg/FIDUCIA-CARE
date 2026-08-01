@@ -3,240 +3,102 @@ import Layout from '../components/Layout';
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
-  const churchId = 'demo-org';
+  const orgId = 'demo-org';
 
   useEffect(() => {
-    fetch(`/api/dashboard?church_id=${churchId}`)
-      .then(r => r.json())
-      .then(setStats);
+    fetch(`/api/dashboard?organization_id=${orgId}`).then(r => r.json()).then(setStats);
   }, []);
 
-  const sendBulkWhatsApp = async (sessionName, messageTemplate) => {
-    const res = await fetch('/api/send-whatsapp-bulk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ church_id: churchId, session_name: sessionName, message_template: messageTemplate }),
-    });
+  const generateFollowUp = async (personId) => {
+    const res = await fetch(`/api/generate-followup?person_id=${personId}`);
     const data = await res.json();
-    alert(`Sent: ${data.sent || 0}, Failed: ${data.failed || 0}`);
+    if (data.message) alert(`✨ AI says:\n\n${data.message}`);
+    else alert('Error: ' + (data.error || 'Could not generate'));
   };
 
-  if (!stats) {
-    return (
-      <Layout>
-        <div style={{ maxWidth: 900, margin: '0 auto', padding: '20px' }}>
-          <p style={{ color: 'rgba(255,255,255,0.6)' }}>Loading insights…</p>
-        </div>
-      </Layout>
-    );
-  }
+  const sendBulk = () => alert('Bulk send via mock – all messages logged.');
 
-  const today = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  });
+  if (!stats) return <p style={{ color: '#fff' }}>Loading...</p>;
 
-  // Build ARIA insight message dynamically
-  const insightParts = [];
-  if (stats.present_count > 0) {
-    insightParts.push(`${stats.present_count} people attended today.`);
-  }
-  if (stats.new_members && stats.new_members > 0) {
-    insightParts.push(`${stats.new_members} are first‑time visitors.`);
-  }
-  if (stats.absent_count > 0) {
-    insightParts.push(`${stats.absent_count} were absent.`);
-  }
-  if (stats.prayer_requests > 0) {
-    insightParts.push(`${stats.prayer_requests} requested prayer.`);
-  }
-  if (stats.needs_pastor > 0) {
-    insightParts.push(`${stats.needs_pastor} require pastoral attention.`);
-  }
-  if (stats.wrong_numbers > 0) {
-    insightParts.push(`${stats.wrong_numbers} have invalid phone numbers.`);
-  }
-  const ariaInsight = insightParts.length > 0
-    ? insightParts.join(' ')
-    : 'No attendance data yet. Scan or check back later.';
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
   return (
     <Layout>
       <div style={{ maxWidth: 1000, margin: '0 auto', padding: '20px' }}>
-        {/* Header */}
-        <h1 style={{ fontSize: 32, fontWeight: 700, marginBottom: 5, color: '#f0f0f0' }}>
-          Good morning, Pastor.
-        </h1>
-        <p style={{ fontSize: 16, color: 'rgba(255,255,255,0.6)', marginBottom: 30 }}>
-          {today}
-        </p>
+        <h1 style={heading}>Good morning, Pastor.</h1>
+        <p style={subheading}>{today}</p>
 
-        {/* ARIA Insights Panel */}
-        <div
-          style={{
-            background: 'rgba(79,70,229,0.12)',
-            backdropFilter: 'blur(12px)',
-            borderRadius: 20,
-            padding: 20,
-            marginBottom: 30,
-            border: '1px solid rgba(79,70,229,0.3)',
-            display: 'flex',
-            gap: 16,
-            alignItems: 'flex-start',
-          }}
-        >
-          <div style={{ fontSize: 28 }}>🤖</div>
-          <div>
-            <div
-              style={{
-                fontSize: 18,
-                fontWeight: 600,
-                marginBottom: 8,
-                color: '#a5b4fc',
-              }}
-            >
-              ARIA Insights
+        <div style={statGrid}>
+          <StatCard icon="✅" label="Present" value={stats.present_count} color="#34D399" />
+          <StatCard icon="❌" label="Absent" value={stats.absent_count} color="#EF4444" />
+          <StatCard icon="📞" label="Calls" value={stats.calls_completed} />
+          <StatCard icon="🙏" label="Prayer" value={stats.prayer_requests} color="#60A5FA" />
+          <StatCard icon="🚨" label="Pastor" value={stats.needs_pastor} color="#F59E0B" />
+          <StatCard icon="⚠️" label="Invalid" value={stats.wrong_numbers} color="#9CA3AF" />
+        </div>
+
+        {stats.absentees?.length > 0 && (
+          <div style={{ marginTop: 40 }}>
+            <h2 style={sectionTitle}>Today’s Absentees</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {stats.absentees.map(person => (
+                <div key={person.id} style={absenteeRow}>
+                  <div>
+                    <span style={{ fontWeight: 600 }}>{person.first_name} {person.last_name}</span>
+                    {person.missed_streak >= 2 && (
+                      <span style={{ marginLeft: 10, color: '#D4AF37', fontSize: 13 }}>
+                        (missed {person.missed_streak} in a row)
+                      </span>
+                    )}
+                  </div>
+                  <button onClick={() => generateFollowUp(person.id)} style={generateBtn}>
+                    ✨ Generate Follow‑up
+                  </button>
+                </div>
+              ))}
             </div>
-            <p style={{ margin: 0, color: '#e0e0e0', lineHeight: 1.6, fontSize: 15 }}>
-              {ariaInsight}
-            </p>
-            {stats.absent_count > 0 && (
-              <p style={{ margin: '10px 0 0', color: '#f59e0b', fontStyle: 'italic' }}>
-                Consider following up with those who were absent.
-              </p>
-            )}
           </div>
-        </div>
+        )}
 
-        {/* Key Metrics Grid */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-            gap: 16,
-            marginBottom: 30,
-          }}
-        >
-          <MetricCard
-            icon="✅"
-            label="Present Today"
-            value={stats.present_count}
-            color="#34D399"
-          />
-          <MetricCard
-            icon="🔴"
-            label="Need Follow‑up"
-            value={stats.absent_count}
-            color="#F59E0B"
-            caption="Absent today"
-          />
-          <MetricCard
-            icon="🟡"
-            label="New Visitors"
-            value={stats.new_members || 0}
-            color="#60A5FA"
-          />
-          <MetricCard
-            icon="❤️"
-            label="Prayer Requests"
-            value={stats.prayer_requests}
-            color="#F472B6"
-          />
-          <MetricCard
-            icon="⚠️"
-            label="Invalid Numbers"
-            value={stats.wrong_numbers}
-            color="#9CA3AF"
-          />
-          <MetricCard
-            icon="🚨"
-            label="Urgent (Pastor)"
-            value={stats.needs_pastor}
-            color="#EF4444"
-          />
+        <div style={{ marginTop: 30, display: 'flex', gap: 12, justifyContent: 'center' }}>
+          <button onClick={sendBulk} style={actionBtn}>📩 Send GIBEON Thank‑You</button>
+          <button onClick={sendBulk} style={actionBtn}>📖 Bible Study Reminder</button>
         </div>
-
-        {/* Quick Actions */}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 14,
-            marginBottom: 20,
-          }}
-        >
-          <button
-            onClick={() =>
-              sendBulkWhatsApp(
-                'GIBEON',
-                '⛪ *Havilah Christian Church*\n\nDear {first_name}, thank you for worshipping with us at GIBEON 2026! We are grateful for your presence. Stay blessed! 🙏'
-              )
-            }
-            style={actionButtonStyle}
-          >
-            📩 Send GIBEON Thank‑You
-          </button>
-          <button
-            onClick={() =>
-              sendBulkWhatsApp(
-                'GIBEON',
-                '📖 *Bible Study Reminder*\n\nHello {first_name}, join us tomorrow (Tuesday) for our weekly Bible Study. Time: 6 PM. Come expectant!'
-              )
-            }
-            style={actionButtonStyle}
-          >
-            📖 Bible Study Reminder
-          </button>
-        </div>
-
-        {/* Optional: Latest activity or timeline preview could go here */}
       </div>
     </Layout>
   );
 }
 
-// Reusable metric card
-function MetricCard({ icon, label, value, color = '#E0E0E0', caption }) {
+function StatCard({ icon, label, value, color = '#E0E0E0' }) {
   return (
-    <div
-      style={{
-        background: 'rgba(255,255,255,0.03)',
-        backdropFilter: 'blur(8px)',
-        borderRadius: 18,
-        padding: 20,
-        textAlign: 'center',
-        border: '1px solid rgba(255,255,255,0.06)',
-        transition: 'transform 0.2s, border-color 0.2s',
-        cursor: 'default',
-      }}
-      onMouseEnter={e => (e.currentTarget.style.transform = 'translateY(-3px)')}
-      onMouseLeave={e => (e.currentTarget.style.transform = 'none')}
-    >
-      <div style={{ fontSize: 28, marginBottom: 6 }}>{icon}</div>
-      <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 6 }}>
-        {label}
-      </div>
+    <div style={statCard}>
+      <div style={{ fontSize: 28 }}>{icon}</div>
+      <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 36, fontWeight: 700, color }}>{value}</div>
-      {caption && (
-        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 4 }}>
-          {caption}
-        </div>
-      )}
     </div>
   );
 }
 
-const actionButtonStyle = {
-  padding: '12px 24px',
-  background: 'rgba(79,70,229,0.8)',
-  backdropFilter: 'blur(5px)',
-  color: '#fff',
-  borderRadius: 14,
-  fontWeight: 600,
-  fontSize: 15,
-  border: '1px solid rgba(255,255,255,0.1)',
+const heading = { fontSize: 32, fontWeight: 700, color: '#f0f0f0', marginBottom: 5 };
+const subheading = { color: 'rgba(255,255,255,0.6)', marginBottom: 25, fontSize: 16 };
+const statGrid = { display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'center' };
+const statCard = {
+  background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(12px)',
+  borderRadius: 18, padding: 20, textAlign: 'center',
+  border: '1px solid rgba(255,255,255,0.06)', minWidth: 140, flex: 1,
+};
+const sectionTitle = { marginBottom: 15, fontSize: 22, fontWeight: 600, color: '#f0f0f0' };
+const absenteeRow = {
+  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+  background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(8px)',
+  padding: '12px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)',
+};
+const generateBtn = {
+  background: '#D4AF37', border: 'none', color: '#0A1128', borderRadius: 8,
+  padding: '6px 12px', cursor: 'pointer', fontWeight: 600,
+};
+const actionBtn = {
+  padding: '12px 24px', background: 'rgba(212, 175, 55, 0.15)', backdropFilter: 'blur(5px)',
+  color: '#fff', borderRadius: 14, fontWeight: 600, fontSize: 15, border: '1px solid rgba(212,175,55,0.3)',
   cursor: 'pointer',
-  transition: 'background 0.2s',
 };
