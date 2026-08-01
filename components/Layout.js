@@ -47,11 +47,31 @@ export default function Layout({ children }) {
       {/* ---------- Page Content ---------- */}
       <main style={main}>{children}</main>
 
-      {/* ---------- Footer with Tagline ---------- */}
-      <footer style={footer}>
-        <span style={{ opacity: 0.5, letterSpacing: 2, fontSize: 11, textTransform: 'uppercase' }}>
-          Every Person. Every Story. Remembered.
-        </span>
+      {/* ---------- Footer – futuristic, minimal ---------- */}
+      <footer
+        style={{
+          position: 'fixed',
+          bottom: 0,
+          left: 0,
+          width: '100%',
+          backdropFilter: 'blur(30px)',
+          background: 'rgba(10, 15, 26, 0.7)',
+          color: '#fff',
+          textAlign: 'center',
+          padding: '10px 0',
+          fontSize: 12,
+          zIndex: 1000,
+          borderTop: '1px solid rgba(255,255,255,0.04)',
+          letterSpacing: 1,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: 6,
+        }}
+      >
+        <span style={{ opacity: 0.5 }}>FIDUCIA CARE</span>
+        <span style={{ opacity: 0.3, fontWeight: 300 }}>·</span>
+        <span style={{ opacity: 0.5, fontWeight: 300 }}>Every Person. Every Story. Remembered.</span>
       </footer>
 
       <style jsx global>{`
@@ -179,20 +199,4 @@ const main = {
   zIndex: 1,
   paddingBottom: 100,
   minHeight: '100vh',
-};
-
-// ---------- Footer ----------
-const footer = {
-  position: 'fixed',
-  bottom: 0,
-  left: 0,
-  width: '100%',
-  backdropFilter: 'blur(30px)',
-  background: 'rgba(10, 15, 26, 0.7)',
-  color: '#fff',
-  textAlign: 'center',
-  padding: '10px 0',
-  fontSize: 13,
-  zIndex: 1000,
-  borderTop: '1px solid rgba(255,255,255,0.04)',
 };
