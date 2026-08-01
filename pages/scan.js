@@ -114,12 +114,11 @@ export default function ScanPage() {
       <div style={{ maxWidth: 600, margin: '40px auto', padding: '0 20px', textAlign: 'center' }}>
         <h1 style={heading}>Scan Attendance</h1>
         <p style={subheading}>{today}</p>
+
         {scanState.status === 'idle' && (
           <>
             <div style={{ marginBottom: 25 }}>
-              <label style={{ fontWeight: 600, display: 'block', marginBottom: 8, color: '#f0f0f0' }}>
-                Program / Event Name
-              </label>
+              <label style={labelStyle}>Program / Event Name</label>
               <input
                 type="text"
                 value={programName}
@@ -155,12 +154,10 @@ export default function ScanPage() {
               </div>
             )}
 
-            {/* Status message */}
             <p style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>
               {scanState.status === 'processing' ? '⏳' : ''} {scanState.message}
             </p>
 
-            {/* Confidence list */}
             {results?.people && scanState.status === 'success' && (
               <>
                 <div style={{ marginBottom: 12, color: '#34D399' }}>
@@ -175,11 +172,11 @@ export default function ScanPage() {
                           width: `${p.confidence}%`,
                           height: '100%',
                           borderRadius: 3,
-                          background: p.confidence >= 90 ? '#34D399' : p.confidence >= 80 ? '#F59E0B' : '#EF4444',
+                          background: p.confidence >= 90 ? '#34D399' : p.confidence >= 80 ? '#D4AF37' : '#EF4444',
                           transition: 'width 0.3s',
                         }} />
                       </div>
-                      <span style={{ flex: 0.5, textAlign: 'right', fontWeight: 600, color: p.confidence >= 90 ? '#34D399' : p.confidence >= 80 ? '#F59E0B' : '#EF4444' }}>
+                      <span style={{ flex: 0.5, textAlign: 'right', fontWeight: 600, color: p.confidence >= 90 ? '#34D399' : p.confidence >= 80 ? '#D4AF37' : '#EF4444' }}>
                         {p.confidence}%
                       </span>
                       <span style={{ flex: 1.5, textAlign: 'right', color: 'rgba(255,255,255,0.6)' }}>
@@ -206,41 +203,42 @@ export default function ScanPage() {
   );
 }
 
+// Local styles for scan page (place after component)
 const heading = { fontSize: 28, fontWeight: 700, color: '#f0f0f0', marginBottom: 8 };
 const subheading = { color: 'rgba(255,255,255,0.6)', marginBottom: 25 };
+const labelStyle = { fontWeight: 600, display: 'block', marginBottom: 8, color: '#f0f0f0' };
 const inputStyle = {
-  padding: '12px 16px', fontSize: 16, borderRadius: 12, border: '1px solid rgba(255,255,255,0.15)',
-  background: 'rgba(255,255,255,0.05)', backdropFilter: 'blur(5px)', color: '#fff',
-  width: '100%', maxWidth: 300, textAlign: 'center', outline: 'none',
+  padding: '12px 16px', fontSize: 16, borderRadius: 12,
+  border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)',
+  backdropFilter: 'blur(5px)', color: '#fff', width: '100%', maxWidth: 300,
+  textAlign: 'center', outline: 'none',
 };
 const cameraBtn = {
-  background: 'linear-gradient(135deg, #4F46E5, #7C3AED)',
-  color: '#fff', padding: '18px 40px', borderRadius: 16, fontSize: 20,
-  fontWeight: 600, boxShadow: '0 8px 24px rgba(79,70,229,0.3)',
-  transition: 'transform 0.2s',
+  background: 'rgba(212,175,55,0.1)', border: '1px solid rgba(212,175,55,0.2)',
+  color: '#D4AF37', padding: '18px 40px', borderRadius: 16, fontSize: 20,
+  fontWeight: 600, backdropFilter: 'blur(10px)', transition: 'transform 0.2s',
 };
 const resultCard = {
   marginTop: 30, padding: 16, borderRadius: 16, backdropFilter: 'blur(10px)',
-  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+  background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
   color: '#f0f0f0', textAlign: 'left',
 };
 const scanLineContainer = {
-  height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.05)', marginBottom: 15, overflow: 'hidden',
+  height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.03)', marginBottom: 15, overflow: 'hidden',
 };
 const scanLine = {
   width: '30%', height: '100%', background: '#D4AF37',
-  animation: 'scanMove 1.5s ease-in-out infinite',
-  borderRadius: 2,
+  animation: 'scanMove 1.5s ease-in-out infinite', borderRadius: 2,
 };
 const confidenceRow = {
-  display: 'flex', alignItems: 'center', padding: '6px 0',
-  borderBottom: '1px solid rgba(255,255,255,0.08)',
+  display: 'flex', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)',
 };
 const viewBtn = {
-  marginTop: 15, width: '100%', padding: '12px', background: '#34D399',
-  color: '#000', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer',
+  marginTop: 15, width: '100%', padding: '12px', background: '#D4AF37',
+  color: '#0A0F1A', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer',
 };
 const retryBtn = {
-  marginTop: 10, padding: '10px 20px', background: '#EF4444', color: '#fff',
-  border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer',
+  marginTop: 10, padding: '10px 20px', background: 'transparent',
+  border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444',
+  borderRadius: 10, fontWeight: 600, cursor: 'pointer',
 };
