@@ -48,7 +48,6 @@ export default async function handler(req, res) {
     const { people } = await aiRes.json();
     if (!people || people.length === 0) return res.status(400).json({ error: 'No people found.' });
 
-    // 3. Transform to our internal format
     const transformed = people.map(p => ({
       first_name: p.name?.trim() || 'Unknown',
       last_name: '',
@@ -56,7 +55,6 @@ export default async function handler(req, res) {
       confidence: p.confidence || 70,
     }));
 
-    // 4. Save high-confidence (>=80) directly, low-confidence go to pending_reviews
     const HIGH_THRESHOLD = 80;
     const high = transformed.filter(p => p.confidence >= HIGH_THRESHOLD);
     const low = transformed.filter(p => p.confidence < HIGH_THRESHOLD);
@@ -66,14 +64,11 @@ export default async function handler(req, res) {
     let newMembersCount = 0;
 
     if (high.length > 0) {
-      // Fetch existing active people
       const existingRes = await client.query(
         `SELECT id, first_name, phone FROM people WHERE organization_id = $1 AND status = 'active'`,
         [orgId]
       );
       const existingList = existingRes.rows;
-
-      // Use fuzzy matching to find matches (we have matchNamesToMembers that works on people)
       const { presentIds: matched, unmatched } = matchNamesToMembers(high, existingList);
       presentIds = matched;
 
@@ -81,15 +76,58 @@ export default async function handler(req, res) {
       for (const person of unmatched) {
         const firstName = person.first_name;
         const phone = person.phone || '';
-        const insertRes = await client.query(
-          `INSERT INTO people (organization_id, first_name, last_name, phone, type, status)
-           VALUES ($1, $2, '', $3, 'visitor', 'active') RETURNING id`,
-          [orgId, firstName, phone]
-        );
-        presentIds.push(insertRes.rows[0].id);
-        newMembersCount++;
+        let memberId = null;
+
+        // If phone exists, check for duplicate phone
+        if (phone) {
+          const existing = await client.query(
+            `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 AND status = 'active' LIMIT 1`,
+            [orgId, phone]
+          );
+          if (existing.rows.length > 0) {
+            memberId = existing.rows[0].id;
+            // Optionally update the name
+            await client.query(`UPDATE people SET first_name = $1 WHERE id = $2`, [firstName, memberId]);
+            console.log(`Found existing person by phone ${phone}, using id ${memberId}`);
+            presentIds.push(memberId);
+            continue;
+          }
+        }
+
+        // Insert new person
+        try {
+          const insertRes = await client.query(
+            `INSERT INTO people (organization_id, first_name, last_name, phone, type, status)
+             VALUES ($1, $2, '', $3, 'visitor', 'active')
+             RETURNING id`,
+            [orgId, firstName, phone]
+          );
+          memberId = insertRes.rows[0].id;
+          console.log(`Inserted new person ${firstName} with id ${memberId}`);
+          newMembersCount++;
+        } catch (insertErr) {
+          console.error(`Insert error for ${firstName}:`, insertErr.message);
+          // If insert failed due to a constraint, try to find by phone again
+          if (phone) {
+            const retry = await client.query(
+              `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 LIMIT 1`,
+              [orgId, phone]
+            );
+            if (retry.rows.length > 0) {
+              memberId = retry.rows[0].id;
+              console.log(`Retry found person by phone ${phone}, using id ${memberId}`);
+            }
+          }
+        }
+
+        if (memberId) {
+          presentIds.push(memberId);
+        } else {
+          console.error(`Failed to get a valid ID for ${firstName}, skipping.`);
+        }
       }
     }
+        console.log('Present IDs before attendance:', presentIds.length);
 
     // 5. Record attendance for all presentIds and log timeline events
     const today = new Date().toISOString().slice(0, 10);
@@ -115,19 +153,22 @@ export default async function handler(req, res) {
     const sectionId = sectionRes.rows[0].id;
 
     for (const personId of presentIds) {
-      // Mark attendance
-      await client.query(
-        `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
-         VALUES ($1, $2, true, $3)
-         ON CONFLICT (member_id, attendance_date) DO UPDATE SET present = true`,
-        [personId, today, sectionId]
-      );
-      // Log timeline event
-      await client.query(
-        `INSERT INTO timeline_events (person_id, organization_id, event_type, description, metadata)
-         VALUES ($1, $2, 'attendance', 'Present at ' || $3, '{"program": "' || $3 || '"}')`,
-        [personId, orgId, programName]
-      );
+      try {
+        await client.query(
+          `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
+           VALUES ($1, $2, true, $3)
+           ON CONFLICT (member_id, attendance_date) DO UPDATE SET present = true`,
+          [personId, today, sectionId]
+        );
+        // Log timeline event
+        await client.query(
+          `INSERT INTO timeline_events (person_id, organization_id, event_type, description, metadata)
+           VALUES ($1, $2, 'attendance', 'Present at ' || $3, '{"program": "' || $3 || '"}')`,
+          [personId, orgId, programName]
+        );
+      } catch (attErr) {
+        console.error(`Attendance insert error for person ${personId}:`, attErr.message);
+      }
     }
 
     // Mark others absent
@@ -176,4 +217,4 @@ export default async function handler(req, res) {
     console.error('Scan error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-  }
+            }
