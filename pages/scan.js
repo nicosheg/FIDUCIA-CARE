@@ -92,7 +92,7 @@ export default function ScanPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          church_id: 'demo-church',
+          church_id: 'demo-org',
           program_name: programName.trim() || 'GIBEON',
           image_base64: base64,
         }),
