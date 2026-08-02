@@ -28,7 +28,7 @@ export default function ScanPage() {
       img.src = objectUrl;
       img.onload = () => {
         URL.revokeObjectURL(objectUrl);
-        const MAX_WIDTH = 400;          // smaller = faster upload
+        const MAX_WIDTH = 400;
         const MAX_HEIGHT = 400;
         let width = img.width;
         let height = img.height;
@@ -59,7 +59,7 @@ export default function ScanPage() {
             reader.readAsDataURL(blob);
           },
           'image/jpeg',
-          0.4           // lower quality = smaller payload
+          0.4
         );
       };
       img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Image loading failed')); };
@@ -94,7 +94,6 @@ export default function ScanPage() {
           status: 'success',
           message: `✅ Scan complete! ${data.present_count} present (${data.new_members} new).`,
         });
-        // Auto‑redirect to Community after 2 seconds
         setTimeout(() => {
           clearScanState();
           router.push('/community');
@@ -137,6 +136,11 @@ export default function ScanPage() {
                 placeholder="e.g., GIBEON"
                 style={inputStyle}
               />
+            </div>
+
+            {/* Pre‑scan capture tip */}
+            <div style={tipStyle}>
+              💡 <strong>Capture tip:</strong> Make sure the full page is visible — no torn, folded, or cut‑off edges — and good lighting.
             </div>
 
             <label htmlFor="cameraInput" style={{ cursor: 'pointer', display: 'inline-block' }}>
@@ -190,7 +194,7 @@ export default function ScanPage() {
                         {p.confidence}%
                       </span>
                       <span style={{ flex: 1.5, textAlign: 'right', color: 'rgba(255,255,255,0.6)' }}>
-                        {p.phone || '—'}
+                        {p.phone || (p.phone_unclear ? '⚠️' : '—')}
                       </span>
                     </div>
                   ))}
@@ -250,4 +254,16 @@ const retryBtn = {
   marginTop: 10, padding: '10px 20px', background: 'transparent',
   border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444',
   borderRadius: 10, fontWeight: 600, cursor: 'pointer',
+};
+const tipStyle = {
+  marginBottom: 20,
+  padding: '10px 16px',
+  borderRadius: 12,
+  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid rgba(255,255,255,0.06)',
+  color: 'rgba(255,255,255,0.6)',
+  fontSize: 14,
+  maxWidth: 350,
+  margin: '0 auto 25px',
+  textAlign: 'left',
 };
