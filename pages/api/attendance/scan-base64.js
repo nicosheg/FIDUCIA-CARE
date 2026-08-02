@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     const rawText = ocrData.ParsedResults[0].ParsedText;
     console.log('Raw OCR text:', rawText);
 
-    // 2. AI correction – now returns an array of { name, phone, confidence }
+    // 2. AI correction
     const aiRes = await fetch(`${req.headers.origin || 'http://localhost:3000'}/api/ai/correct-scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -46,76 +46,30 @@ export default async function handler(req, res) {
     });
     if (!aiRes.ok) {
       const err = await aiRes.json();
+      console.error('AI correction failed:', err);
       return res.status(500).json({ error: 'AI correction failed: ' + (err.error || 'unknown') });
     }
     const { people } = await aiRes.json();
     console.log('Corrected people:', people);
 
-    // ── HARD GUARD: never allow null/empty names ──
-    const validPeople = (people || [])
-      .filter(p => p.name && p.name.trim().length > 0)
-      .map(p => ({
-        first_name: p.name.trim(),
-        last_name: '',
-        phone: p.phone || '',
-        confidence: p.confidence || 70,
-      }));
-
-    if (validPeople.length === 0) {
-      // Fallback: use raw OCR lines as names so nothing is invisible
-      console.log('No valid people after AI, using raw lines as names');
+    if (!people || people.length === 0) {
+      console.log('No people from AI, falling back to raw lines');
       const lines = rawText.split('\n').filter(l => l.trim());
-      const fallbackPeople = lines.map(line => ({
-        first_name: line.trim(),
-        last_name: '',
-        phone: '',
-        confidence: 50,
-      }));
-      return res.status(200).json({
-        status: 'ok',
-        present_count: 0,
-        absent_count: 0,
-        new_members: 0,
-        people: fallbackPeople,
-      });
+      const fallbackPeople = lines.map(line => ({ name: line.trim(), phone: '', confidence: 50 }));
+      return res.status(200).json({ status: 'ok', present_count: 0, absent_count: 0, new_members: 0, people: fallbackPeople });
     }
 
-    // 3. Save every person to the database
+    // 3. Insert into database – skip fuzzy matching for now to ensure insertion
     const client = await pool.connect();
-    let presentIds = [];
     let newMembersCount = 0;
+    let presentIds = [];
 
-    const existingRes = await client.query(
-      `SELECT id, first_name, phone FROM people WHERE organization_id = $1 AND status = 'active'`,
-      [orgId]
-    );
-    const existingList = existingRes.rows;
-    const { presentIds: matched, unmatched } = matchNamesToMembers(validPeople, existingList);
-    presentIds = matched;
+    for (const person of people) {
+      const fullName = person.name?.trim() || 'Unknown';
+      const phone = person.phone || '';
+      
+      console.log(`Inserting: ${fullName}, phone: ${phone}`);
 
-    // Insert unmatched (new) people
-    for (const person of unmatched) {
-      const fullName = person.first_name;
-      if (!fullName) continue; // safety
-
-      let phone = person.phone || '';
-      let memberId = null;
-
-      // If phone exists, check for duplicate
-      if (phone) {
-        const existing = await client.query(
-          `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 AND status = 'active' LIMIT 1`,
-          [orgId, phone]
-        );
-        if (existing.rows.length > 0) {
-          memberId = existing.rows[0].id;
-          await client.query(`UPDATE people SET first_name = $1 WHERE id = $2`, [fullName, memberId]);
-          presentIds.push(memberId);
-          continue;
-        }
-      }
-
-      // Insert new person
       try {
         const insertRes = await client.query(
           `INSERT INTO people (organization_id, first_name, last_name, phone, type, status)
@@ -123,25 +77,18 @@ export default async function handler(req, res) {
            RETURNING id`,
           [orgId, fullName, phone]
         );
-        memberId = insertRes.rows[0].id;
+        const memberId = insertRes.rows[0].id;
+        presentIds.push(memberId);
         newMembersCount++;
+        console.log(`Inserted ${fullName} with id ${memberId}`);
       } catch (insertErr) {
         console.error(`Insert error for ${fullName}:`, insertErr.message);
-        if (phone) {
-          const retry = await client.query(
-            `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 LIMIT 1`,
-            [orgId, phone]
-          );
-          if (retry.rows.length > 0) memberId = retry.rows[0].id;
-        }
       }
-
-      if (memberId) presentIds.push(memberId);
     }
 
     console.log('Present IDs:', presentIds.length);
 
-    // 4. Record attendance and timeline
+    // 4. Record attendance and timeline events
     const today = new Date().toISOString().slice(0, 10);
     let sessionId;
     let sessionRes = await client.query(
@@ -165,21 +112,17 @@ export default async function handler(req, res) {
     const sectionId = sectionRes.rows[0].id;
 
     for (const personId of presentIds) {
-      try {
-        await client.query(
-          `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
-           VALUES ($1, $2, true, $3)
-           ON CONFLICT (member_id, attendance_date) DO UPDATE SET present = true`,
-          [personId, today, sectionId]
-        );
-        await client.query(
-          `INSERT INTO timeline_events (person_id, organization_id, event_type, description, metadata)
-           VALUES ($1, $2, 'attendance', 'Present at ' || $3, ('{"program": "' || $3 || '"}')::jsonb)`,
-          [personId, orgId, programName]
-        );
-      } catch (attErr) {
-        console.error(`Attendance insert error for person ${personId}:`, attErr.message);
-      }
+      await client.query(
+        `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
+         VALUES ($1, $2, true, $3)
+         ON CONFLICT (member_id, attendance_date) DO UPDATE SET present = true`,
+        [personId, today, sectionId]
+      );
+      await client.query(
+        `INSERT INTO timeline_events (person_id, organization_id, event_type, description, metadata)
+         VALUES ($1, $2, 'attendance', 'Present at ' || $3, ('{"program": "' || $3 || '"}')::jsonb)`,
+        [personId, orgId, programName]
+      );
     }
 
     // Mark others absent
@@ -201,16 +144,15 @@ export default async function handler(req, res) {
 
     client.release();
 
-    // Return the people who were actually saved
     return res.status(200).json({
       status: 'ok',
       present_count: presentIds.length,
       absent_count: allActiveIds.length - presentIds.length,
       new_members: newMembersCount,
-      people: validPeople,   // the frontend can show these
+      people: people,
     });
   } catch (error) {
     console.error('Scan error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-                  }
+}
