@@ -30,7 +30,7 @@ Format:
         { role: 'system', content: systemPrompt },
         { role: 'user', content: rawText },
       ],
-      temperature: 0.2,
+      temperature: 0,
       max_tokens: 2000,
     }),
   });
