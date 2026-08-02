@@ -88,12 +88,10 @@ export default function CommunityPage() {
 
   const cancelEdit = () => setEditingId(null);
 
-  // ----- OPTIMISTIC DELETE (single) -----
   const handleDeleteSingle = async (personId, e) => {
     if (e) e.stopPropagation();
     if (!confirm('Move to trash?')) return;
 
-    // Remove from UI instantly
     const backup = people.find(p => p.id === personId);
     setPeople(prev => prev.filter(p => p.id !== personId));
 
@@ -105,23 +103,19 @@ export default function CommunityPage() {
       });
       const data = await res.json();
       if (!data.success) {
-        // Restore if API failed
         setPeople(prev => [...prev, backup]);
         alert('Delete failed: ' + (data.error || 'Unknown'));
       }
     } catch (err) {
-      // Network error – restore
       setPeople(prev => [...prev, backup]);
       alert('Network error – person not deleted.');
     }
   };
 
-  // ----- OPTIMISTIC BULK DELETE -----
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`Move ${selectedIds.size} selected people to trash?`)) return;
 
-    // Backup for rollback
     const backup = people.filter(p => selectedIds.has(p.id));
     setPeople(prev => prev.filter(p => !selectedIds.has(p.id)));
     setSelectedIds(new Set());
@@ -135,7 +129,6 @@ export default function CommunityPage() {
           body: JSON.stringify({ id }),
         });
       } catch (err) {
-        // Rollback all on any error – you can also do per‑item
         setPeople(prev => [...backup, ...prev]);
         alert('One or more deletes failed. Rolled back.');
         break;
@@ -277,7 +270,14 @@ export default function CommunityPage() {
                       </span>
                     )}
                   </div>
-                  <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 14 }}>{person.phone || 'No phone'}</div>
+                  {/* Phone line with unclear flag */}
+                  <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 14 }}>
+                    {person.phone
+                      ? person.phone
+                      : person.phone_unclear
+                        ? <span style={{ color: '#F59E0B', fontStyle: 'italic' }}>Phone unclear — tap to confirm</span>
+                        : 'No phone'}
+                  </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={() => startEdit(person)} style={actionLink}>✏️ Edit</button>
                     <Link href={`/person/${person.id}`} style={actionLink}>📋 Journey</Link>
@@ -300,7 +300,7 @@ export default function CommunityPage() {
   );
 }
 
-// Styles (same as before)
+// Styles
 const pageTitle = { fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 25 };
 const selectBar = {
   position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
