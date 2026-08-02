@@ -15,6 +15,7 @@ export default async function handler(req, res) {
 
   try {
     // 1. OCR via OCR.space (form‑encoded)
+    console.log('Starting OCR...');
     const params = new URLSearchParams();
     params.append('base64Image', `data:image/jpeg;base64,${base64}`);
     params.append('apikey', process.env.OCR_SPACE_API_KEY || 'helloworld');
@@ -31,11 +32,13 @@ export default async function handler(req, res) {
     const ocrData = await ocrRes.json();
     if (ocrData.IsErroredOnProcessing || !ocrData.ParsedResults?.length) {
       const errMsg = ocrData.ErrorMessage || 'No parsed results';
+      console.error('OCR failed:', errMsg);
       return res.status(400).json({ error: `OCR failed: ${errMsg}` });
     }
     const rawText = ocrData.ParsedResults[0].ParsedText;
+    console.log('Raw OCR text:', rawText);
 
-    // 2. AI correction & structuring
+    // 2. AI correction & structuring (Groq or local fallback)
     const aiRes = await fetch(`${req.headers.origin || 'http://localhost:3000'}/api/ai/correct-scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -43,83 +46,99 @@ export default async function handler(req, res) {
     });
     if (!aiRes.ok) {
       const err = await aiRes.json();
+      console.error('AI correction failed:', err);
       return res.status(500).json({ error: 'AI correction failed: ' + (err.error || 'unknown') });
     }
     const { people } = await aiRes.json();
-    if (!people || people.length === 0) return res.status(400).json({ error: 'No people found.' });
+    console.log('Corrected people:', people);
 
-    const transformed = people.map(p => ({
-      first_name: p.name?.trim() || 'Unknown',
-      last_name: '',
-      phone: p.phone || '',
-      confidence: p.confidence || 70,
-    }));
+    if (!people || people.length === 0) {
+      console.log('No people from AI, falling back to raw lines');
+      const lines = rawText.split('\n').filter(l => l.trim());
+      const fallbackPeople = lines.map(line => ({
+        name: line.trim(),
+        phone: '',
+        confidence: 50,
+      }));
+      return res.status(200).json({
+        status: 'ok',
+        present_count: 0,
+        absent_count: 0,
+        new_members: 0,
+        people: fallbackPeople,
+      });
+    }
 
-    const HIGH_THRESHOLD = 80;
-    const high = transformed.filter(p => p.confidence >= HIGH_THRESHOLD);
-    const low = transformed.filter(p => p.confidence < HIGH_THRESHOLD);
+    // Transform and flag unclear phones
+    const transformed = people.map(p => {
+      const phone = p.phone || '';
+      const phoneUnclear = phone.length > 0 && phone.length < 10; // incomplete numbers
+      return {
+        first_name: p.name?.trim() || 'Unknown',
+        last_name: '',
+        phone: phoneUnclear ? '' : phone,        // store empty if unclear
+        phone_unclear: phoneUnclear,
+        confidence: p.confidence || 70,
+      };
+    });
 
+    // Save every person (confidence threshold = 0 for now, ensure they appear)
     const client = await pool.connect();
     let presentIds = [];
     let newMembersCount = 0;
 
-    if (high.length > 0) {
-      const existingRes = await client.query(
-        `SELECT id, first_name, phone FROM people WHERE organization_id = $1 AND status = 'active'`,
-        [orgId]
-      );
-      const existingList = existingRes.rows;
-      const { presentIds: matched, unmatched } = matchNamesToMembers(high, existingList);
-      presentIds = matched;
+    const existingRes = await client.query(
+      `SELECT id, first_name, phone FROM people WHERE organization_id = $1 AND status = 'active'`,
+      [orgId]
+    );
+    const existingList = existingRes.rows;
+    const { presentIds: matched, unmatched } = matchNamesToMembers(transformed, existingList);
+    presentIds = matched;
 
-      // Insert unmatched as new people
-      for (const person of unmatched) {
-        const firstName = person.first_name;
-        const phone = person.phone || '';
-        let memberId = null;
+    for (const person of unmatched) {
+      const fullName = person.first_name;
+      const phone = person.phone || '';
+      let memberId = null;
 
-        // If phone exists, check for duplicate phone
-        if (phone) {
-          const existing = await client.query(
-            `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 AND status = 'active' LIMIT 1`,
-            [orgId, phone]
-          );
-          if (existing.rows.length > 0) {
-            memberId = existing.rows[0].id;
-            await client.query(`UPDATE people SET first_name = $1 WHERE id = $2`, [firstName, memberId]);
-            presentIds.push(memberId);
-            continue;
-          }
-        }
-
-        // Insert new person
-        try {
-          const insertRes = await client.query(
-            `INSERT INTO people (organization_id, first_name, last_name, phone, type, status)
-             VALUES ($1, $2, '', $3, 'visitor', 'active')
-             RETURNING id`,
-            [orgId, firstName, phone]
-          );
-          memberId = insertRes.rows[0].id;
-          newMembersCount++;
-        } catch (insertErr) {
-          console.error(`Insert error for ${firstName}:`, insertErr.message);
-          if (phone) {
-            const retry = await client.query(
-              `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 LIMIT 1`,
-              [orgId, phone]
-            );
-            if (retry.rows.length > 0) {
-              memberId = retry.rows[0].id;
-            }
-          }
-        }
-
-        if (memberId) {
+      // If phone exists, check for duplicate phone
+      if (phone) {
+        const existing = await client.query(
+          `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 AND status = 'active' LIMIT 1`,
+          [orgId, phone]
+        );
+        if (existing.rows.length > 0) {
+          memberId = existing.rows[0].id;
+          await client.query(`UPDATE people SET first_name = $1 WHERE id = $2`, [fullName, memberId]);
           presentIds.push(memberId);
+          continue;
         }
       }
+
+      // Insert new person
+      try {
+        const insertRes = await client.query(
+          `INSERT INTO people (organization_id, first_name, last_name, phone, type, status)
+           VALUES ($1, $2, '', $3, 'visitor', 'active')
+           RETURNING id`,
+          [orgId, fullName, phone]
+        );
+        memberId = insertRes.rows[0].id;
+        newMembersCount++;
+      } catch (insertErr) {
+        console.error(`Insert error for ${fullName}:`, insertErr.message);
+        if (phone) {
+          const retry = await client.query(
+            `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 LIMIT 1`,
+            [orgId, phone]
+          );
+          if (retry.rows.length > 0) memberId = retry.rows[0].id;
+        }
+      }
+
+      if (memberId) presentIds.push(memberId);
     }
+
+    console.log('Present IDs:', presentIds.length);
 
     // 5. Record attendance and timeline events
     const today = new Date().toISOString().slice(0, 10);
@@ -152,9 +171,10 @@ export default async function handler(req, res) {
            ON CONFLICT (member_id, attendance_date) DO UPDATE SET present = true`,
           [personId, today, sectionId]
         );
+        // Fix the metadata casting issue
         await client.query(
           `INSERT INTO timeline_events (person_id, organization_id, event_type, description, metadata)
-           VALUES ($1, $2, 'attendance', 'Present at ' || $3, '{"program": "' || $3 || '"}')`,
+           VALUES ($1, $2, 'attendance', 'Present at ' || $3, ('{"program": "' || $3 || '"}')::jsonb)`,
           [personId, orgId, programName]
         );
       } catch (attErr) {
@@ -181,31 +201,16 @@ export default async function handler(req, res) {
 
     client.release();
 
-    // Save low-confidence entries to pending_reviews
-    const validLow = low.filter(p => p.first_name?.trim());
-    if (validLow.length > 0) {
-      const flatValues = [];
-      const placeholders = validLow.map((p, i) => {
-        const base = i * 6 + 1;
-        flatValues.push(orgId, sessionId, p.first_name, '', p.phone || '', p.confidence);
-        return `($${base}, $${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5})`;
-      }).join(', ');
-      await pool.query(
-        `INSERT INTO pending_reviews (church_id, session_id, first_name, last_name, phone, confidence)
-         VALUES ${placeholders}`,
-        flatValues
-      );
-    }
-
+    // Return the scanned people list for frontend display
     return res.status(200).json({
       status: 'ok',
       present_count: presentIds.length,
       absent_count: allActiveIds.length - presentIds.length,
       new_members: newMembersCount,
-      pending_review: validLow.length,
+      people: transformed,       // includes phone_unclear flags
     });
   } catch (error) {
     console.error('Scan error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-                  }
+}
