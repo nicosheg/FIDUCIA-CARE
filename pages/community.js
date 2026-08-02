@@ -12,9 +12,9 @@ export default function CommunityPage() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [form, setForm] = useState({ first_name: '', last_name: '', phone: '', type: 'visitor' });
+  const [form, setForm] = useState({ full_name: '', phone: '', type: 'visitor' });
   const [editingId, setEditingId] = useState(null);
-  const [editValues, setEditValues] = useState({ first_name: '', phone: '', type: '' });
+  const [editValues, setEditValues] = useState({ full_name: '', phone: '', type: '' });
   const [showDeleted, setShowDeleted] = useState(false);
 
   // Selection state
@@ -27,7 +27,7 @@ export default function CommunityPage() {
   }, [showDeleted]);
 
   const fetchPeople = async () => {
-    const res = await fetch(`/api/people?organization_id=${ORG_ID}&include_deleted=${showDeleted}`);
+    const res = await fetch(`/api/people?organization_id=${ORG_ID}&include_deleted=${showDeleted}&_=${Date.now()}`);
     const data = await res.json();
     if (Array.isArray(data)) {
       setPeople(data);
@@ -42,7 +42,6 @@ export default function CommunityPage() {
       const q = search.toLowerCase();
       result = result.filter(p =>
         (p.first_name || '').toLowerCase().includes(q) ||
-        (p.last_name || '').toLowerCase().includes(q) ||
         (p.phone || '').includes(q)
       );
     }
@@ -51,15 +50,22 @@ export default function CommunityPage() {
 
   const addPerson = async e => {
     e.preventDefault();
+    if (!form.full_name.trim()) return;
     const res = await fetch('/api/people', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, organization_id: ORG_ID }),
+      body: JSON.stringify({
+        first_name: form.full_name.trim(),
+        last_name: '',
+        phone: form.phone,
+        organization_id: ORG_ID,
+        type: form.type,
+      }),
     });
     const data = await res.json();
     if (data.id) {
       setPeople(prev => [data, ...prev]);
-      setForm({ first_name: '', last_name: '', phone: '', type: 'visitor' });
+      setForm({ full_name: '', phone: '', type: 'visitor' });
       setShowAddForm(false);
       setMessage(`✅ ${data.first_name} added`);
       setTimeout(() => setMessage(''), 3000);
@@ -68,18 +74,35 @@ export default function CommunityPage() {
 
   const startEdit = person => {
     setEditingId(person.id);
-    setEditValues({ first_name: person.first_name || '', phone: person.phone || '', type: person.type || 'visitor' });
+    setEditValues({
+      full_name: person.first_name || '',
+      phone: person.phone || '',
+      type: person.type || 'visitor',
+    });
   };
 
   const saveEdit = async id => {
     const res = await fetch('/api/people', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, ...editValues, organization_id: ORG_ID }),
+      body: JSON.stringify({
+        id,
+        first_name: editValues.full_name.trim(),
+        last_name: '',
+        phone: editValues.phone,
+        type: editValues.type,
+        organization_id: ORG_ID,
+      }),
     });
     const data = await res.json();
     if (data.id) {
-      setPeople(prev => prev.map(p => p.id === id ? { ...p, ...editValues } : p));
+      setPeople(prev =>
+        prev.map(p =>
+          p.id === id
+            ? { ...p, first_name: editValues.full_name, phone: editValues.phone, type: editValues.type }
+            : p
+        )
+      );
       setEditingId(null);
       setMessage('✅ Updated');
       setTimeout(() => setMessage(''), 3000);
@@ -216,8 +239,20 @@ export default function CommunityPage() {
 
         {showAddForm && (
           <form onSubmit={addPerson} style={formCard}>
-            <input placeholder="Full name" value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} required style={miniInput} />
-            <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required style={miniInput} />
+            <input
+              placeholder="Full name (e.g., Bro Jerry, Sis Peace)"
+              value={form.full_name}
+              onChange={e => setForm({ ...form, full_name: e.target.value })}
+              required
+              style={miniInput}
+            />
+            <input
+              placeholder="Phone (080...)"
+              value={form.phone}
+              onChange={e => setForm({ ...form, phone: e.target.value })}
+              required
+              style={miniInput}
+            />
             <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={miniInput}>
               <option value="visitor">Visitor</option>
               <option value="member">Member</option>
@@ -249,8 +284,18 @@ export default function CommunityPage() {
             >
               {editingId === person.id ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <input value={editValues.first_name} onChange={e => setEditValues({ ...editValues, first_name: e.target.value })} style={editInput} />
-                  <input value={editValues.phone} onChange={e => setEditValues({ ...editValues, phone: e.target.value })} style={editInput} />
+                  <input
+                    value={editValues.full_name}
+                    onChange={e => setEditValues({ ...editValues, full_name: e.target.value })}
+                    style={editInput}
+                    placeholder="Full name"
+                  />
+                  <input
+                    value={editValues.phone}
+                    onChange={e => setEditValues({ ...editValues, phone: e.target.value })}
+                    style={editInput}
+                    placeholder="Phone"
+                  />
                   <select value={editValues.type} onChange={e => setEditValues({ ...editValues, type: e.target.value })} style={editInput}>
                     <option value="visitor">Visitor</option>
                     <option value="member">Member</option>
@@ -270,13 +315,10 @@ export default function CommunityPage() {
                       </span>
                     )}
                   </div>
-                  {/* Phone line with unclear flag */}
                   <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 14 }}>
                     {person.phone
                       ? person.phone
-                      : person.phone_unclear
-                        ? <span style={{ color: '#F59E0B', fontStyle: 'italic' }}>Phone unclear — tap to confirm</span>
-                        : 'No phone'}
+                      : 'No phone'}
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={() => startEdit(person)} style={actionLink}>✏️ Edit</button>
