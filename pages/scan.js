@@ -21,15 +21,18 @@ export default function ScanPage() {
     setScanStateLocal(prev => ({ ...prev, ...newState }));
   };
 
-  const fileToBase64 = (file) => {
+  // ---------- PREPROCESSING (grayscale, contrast, sharpen) ----------
+  const preprocessImage = (file) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
       const objectUrl = URL.createObjectURL(file);
       img.src = objectUrl;
       img.onload = () => {
         URL.revokeObjectURL(objectUrl);
-        const MAX_WIDTH = 400;
-        const MAX_HEIGHT = 400;
+
+        // Max dimension 800px for speed
+        const MAX_WIDTH = 800;
+        const MAX_HEIGHT = 800;
         let width = img.width;
         let height = img.height;
         if (width > MAX_WIDTH) {
@@ -40,11 +43,59 @@ export default function ScanPage() {
           width = (width * MAX_HEIGHT) / height;
           height = MAX_HEIGHT;
         }
+
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
+
+        // Apply image processing
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+
+        // 1. Grayscale + contrast boost
+        for (let i = 0; i < data.length; i += 4) {
+          // Convert to grayscale using luminance weights
+          let gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+          // Increase contrast – make dark darker, light lighter
+          gray = ((gray - 128) * 1.4) + 128;   // contrast factor 1.4
+          // Clamp
+          gray = Math.min(255, Math.max(0, gray));
+          data[i] = data[i + 1] = data[i + 2] = gray;
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        // 2. Subtle sharpen using convolution
+        const sharpenKernel = [
+          0, -1, 0,
+          -1, 5, -1,
+          0, -1, 0
+        ];
+        const sharpenedData = ctx.getImageData(0, 0, width, height);
+        const outputData = new Uint8ClampedArray(sharpenedData.data);
+        for (let y = 1; y < height - 1; y++) {
+          for (let x = 1; x < width - 1; x++) {
+            let r = 0, g = 0, b = 0;
+            for (let ky = -1; ky <= 1; ky++) {
+              for (let kx = -1; kx <= 1; kx++) {
+                const idx = ((y + ky) * width + (x + kx)) * 4;
+                const weight = sharpenKernel[(ky + 1) * 3 + (kx + 1)];
+                r += sharpenedData.data[idx] * weight;
+                g += sharpenedData.data[idx + 1] * weight;
+                b += sharpenedData.data[idx + 2] * weight;
+              }
+            }
+            const i = (y * width + x) * 4;
+            outputData[i] = Math.min(255, Math.max(0, r));
+            outputData[i + 1] = Math.min(255, Math.max(0, g));
+            outputData[i + 2] = Math.min(255, Math.max(0, b));
+          }
+        }
+        const sharpImageData = new ImageData(outputData, width, height);
+        ctx.putImageData(sharpImageData, 0, 0);
+
+        // Convert to base64 JPEG at quality 0.7
         canvas.toBlob(
           (blob) => {
             if (!blob) { reject(new Error('Canvas toBlob failed')); return; }
@@ -59,10 +110,13 @@ export default function ScanPage() {
             reader.readAsDataURL(blob);
           },
           'image/jpeg',
-          0.4
+          0.7
         );
       };
-      img.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('Image loading failed')); };
+      img.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Image loading failed'));
+      };
     });
   };
 
@@ -71,10 +125,10 @@ export default function ScanPage() {
     if (!file) return;
     e.target.value = null;
 
-    updateState({ status: 'processing', message: 'Reading register...' });
+    updateState({ status: 'processing', message: 'Enhancing image...' });
     setScanningLine(true);
     try {
-      const base64 = await fileToBase64(file);
+      const base64 = await preprocessImage(file);
       updateState({ message: 'Scanning names...' });
 
       const res = await fetch('/api/attendance/scan-base64', {
@@ -180,7 +234,7 @@ export default function ScanPage() {
                 <div style={{ maxHeight: 200, overflowY: 'auto', fontSize: 14 }}>
                   {results.people.map((p, i) => (
                     <div key={i} style={confidenceRow}>
-                      <span style={{ flex: 2 }}>{p.first_name}</span>
+                      <span style={{ flex: 2 }}>{p.first_name || p.name}</span>
                       <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.1)', margin: '0 10px' }}>
                         <div style={{
                           width: `${p.confidence}%`,
@@ -217,7 +271,7 @@ export default function ScanPage() {
   );
 }
 
-// Styles
+// Styles (unchanged)
 const heading = { fontSize: 28, fontWeight: 700, color: '#f0f0f0', marginBottom: 8 };
 const subheading = { color: 'rgba(255,255,255,0.6)', marginBottom: 25 };
 const inputStyle = {
