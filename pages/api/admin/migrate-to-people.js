@@ -3,7 +3,7 @@ import pool from '../../../lib/db';
 export default async function handler(req, res) {
   if (req.method === 'GET' || req.method === 'POST') {
     try {
-      // 1. Create people table if it doesn't exist
+      // 1. Ensure people table exists (should already)
       await pool.query(`
         CREATE TABLE IF NOT EXISTS people (
           id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -20,46 +20,41 @@ export default async function handler(req, res) {
         );
       `);
 
-      // 2. Migrate all members that aren't already in people
+      // 2. Move any remaining members that aren't already in people
       await pool.query(`
         INSERT INTO people (id, organization_id, first_name, last_name, phone, type, status)
-        SELECT id, 'demo-org', first_name, '', phone,
+        SELECT id, church_id, first_name, '', phone,
                CASE WHEN type = 'member' THEN 'member' ELSE 'visitor' END,
                status
         FROM members
         WHERE id NOT IN (SELECT id FROM people)
       `);
 
-      // 3. Update any existing people that still have the old church_id
+      // 3. Update any attendance_records that still reference member_id not in people
+      // (should not happen, but just in case)
       await pool.query(`
-        UPDATE people SET organization_id = 'demo-org'
-        WHERE organization_id = 'demo-church'
+        UPDATE attendance_records ar
+        SET member_id = (SELECT p.id FROM people p WHERE p.id = ar.member_id)
+        WHERE member_id NOT IN (SELECT id FROM people)
       `);
 
-      // 4. Update all related tables to use demo-org
-      await pool.query(`UPDATE sessions SET church_id = 'demo-org' WHERE church_id = 'demo-church'`);
-      await pool.query(`UPDATE attendance_records SET church_id = 'demo-org' WHERE church_id = 'demo-church'`);
-      await pool.query(`UPDATE pending_reviews SET church_id = 'demo-org' WHERE church_id = 'demo-church'`);
-      await pool.query(`UPDATE timeline_events SET organization_id = 'demo-org' WHERE organization_id = 'demo-church'`);
-
-      // 5. Create timeline_events table if missing
+      // 4. Drop the foreign key constraint that references members
       await pool.query(`
-        CREATE TABLE IF NOT EXISTS timeline_events (
-          id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
-          person_id uuid REFERENCES people(id) ON DELETE CASCADE,
-          organization_id text NOT NULL DEFAULT 'demo-org',
-          event_type text NOT NULL,
-          channel text,
-          description text,
-          metadata jsonb DEFAULT '{}',
-          created_at timestamptz DEFAULT now()
-        );
-        CREATE INDEX IF NOT EXISTS idx_timeline_person ON timeline_events(person_id, created_at DESC);
+        ALTER TABLE attendance_records DROP CONSTRAINT IF EXISTS attendance_records_member_id_fkey
       `);
 
-      res.status(200).json({ message: 'Migration complete. All data uses organization ID demo-org.' });
+      // 5. Recreate the foreign key to reference people
+      await pool.query(`
+        ALTER TABLE attendance_records ADD CONSTRAINT attendance_records_member_id_fkey
+          FOREIGN KEY (member_id) REFERENCES people(id) ON DELETE CASCADE
+      `);
+
+      // 6. Drop the members table
+      await pool.query(`DROP TABLE IF EXISTS members CASCADE`);
+
+      res.status(200).json({ message: 'Merge complete. The members table has been dropped. Everything now uses people.' });
     } catch (err) {
-      console.error(err);
+      console.error('Merge/drop error:', err);
       res.status(500).json({ error: err.message });
     }
   } else {
