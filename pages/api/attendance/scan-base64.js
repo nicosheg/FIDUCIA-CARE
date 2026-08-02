@@ -86,9 +86,7 @@ export default async function handler(req, res) {
           );
           if (existing.rows.length > 0) {
             memberId = existing.rows[0].id;
-            // Optionally update the name
             await client.query(`UPDATE people SET first_name = $1 WHERE id = $2`, [firstName, memberId]);
-            console.log(`Found existing person by phone ${phone}, using id ${memberId}`);
             presentIds.push(memberId);
             continue;
           }
@@ -103,11 +101,9 @@ export default async function handler(req, res) {
             [orgId, firstName, phone]
           );
           memberId = insertRes.rows[0].id;
-          console.log(`Inserted new person ${firstName} with id ${memberId}`);
           newMembersCount++;
         } catch (insertErr) {
           console.error(`Insert error for ${firstName}:`, insertErr.message);
-          // If insert failed due to a constraint, try to find by phone again
           if (phone) {
             const retry = await client.query(
               `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 LIMIT 1`,
@@ -115,21 +111,17 @@ export default async function handler(req, res) {
             );
             if (retry.rows.length > 0) {
               memberId = retry.rows[0].id;
-              console.log(`Retry found person by phone ${phone}, using id ${memberId}`);
             }
           }
         }
 
         if (memberId) {
           presentIds.push(memberId);
-        } else {
-          console.error(`Failed to get a valid ID for ${firstName}, skipping.`);
         }
       }
     }
-        console.log('Present IDs before attendance:', presentIds.length);
 
-    // 5. Record attendance for all presentIds and log timeline events
+    // 5. Record attendance and timeline events
     const today = new Date().toISOString().slice(0, 10);
     let sessionId;
     let sessionRes = await client.query(
@@ -160,7 +152,6 @@ export default async function handler(req, res) {
            ON CONFLICT (member_id, attendance_date) DO UPDATE SET present = true`,
           [personId, today, sectionId]
         );
-        // Log timeline event
         await client.query(
           `INSERT INTO timeline_events (person_id, organization_id, event_type, description, metadata)
            VALUES ($1, $2, 'attendance', 'Present at ' || $3, '{"program": "' || $3 || '"}')`,
@@ -217,4 +208,4 @@ export default async function handler(req, res) {
     console.error('Scan error:', error);
     return res.status(500).json({ error: error.message || 'Internal server error' });
   }
-            }
+                  }
