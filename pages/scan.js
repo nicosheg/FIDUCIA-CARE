@@ -130,11 +130,15 @@ export default function ScanPage() {
         const visionRes = await fetch('/api/ai/vision-scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_base64: base64 }),
+          body: JSON.stringify({
+            image_base64: base64,
+            church_id: 'demo-org',
+            program_name: programName.trim() || 'GIBEON',
+          }),
         });
         if (visionRes.ok) {
           const visionData = await visionRes.json();
-          if (visionData.people && visionData.people.length > 0) {
+          if (visionData.status === 'ok' && visionData.people && visionData.people.length > 0) {
             data = visionData;
             console.log('Used vision model');
           }
@@ -143,7 +147,7 @@ export default function ScanPage() {
         console.log('Vision model failed, falling back to OCR+Groq');
       }
 
-      // Fallback to OCR + correction
+      // Fallback to OCR + correction if vision didn't work
       if (!data) {
         const ocrRes = await fetch('/api/attendance/scan-base64', {
           method: 'POST',
@@ -157,7 +161,7 @@ export default function ScanPage() {
         data = await ocrRes.json();
       }
 
-      if (data.status === 'ok') {
+      if (data && data.status === 'ok') {
         setResults(data);
         updateState({
           status: 'success',
@@ -170,7 +174,7 @@ export default function ScanPage() {
       } else {
         updateState({
           status: 'error',
-          message: '❌ ' + (data.error || 'Scan failed'),
+          message: '❌ ' + (data?.error || 'Scan failed'),
         });
       }
     } catch (err) {
