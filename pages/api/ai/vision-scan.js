@@ -1,5 +1,5 @@
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const GROQ_VISION_MODEL = process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b';   // Groq vision model
+const GROQ_VISION_MODEL = process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b';
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 export default async function handler(req, res) {
@@ -26,9 +26,7 @@ export default async function handler(req, res) {
             content: [
               {
                 type: 'image_url',
-                image_url: {
-                  url: `data:image/jpeg;base64,${image_base64}`,
-                },
+                image_url: { url: `data:image/jpeg;base64,${image_base64}` },
               },
             ],
           },
@@ -44,20 +42,36 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json();
-    let content = data.choices[0].message.content.trim();
-    // Strip markdown fences
-    content = content.replace(/```json|```/g, '').trim();
-    // Extract JSON array
-    const arrayMatch = content.match(/\[[\s\S]*\]/);
+    const rawContent = data.choices[0].message.content;
+    console.log('Vision raw response:', rawContent);
+
+    // Try to extract a JSON array from the response
+    let people = [];
+    const cleaned = rawContent.replace(/```json|```/g, '').trim();
+    const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
     if (arrayMatch) {
-      const people = JSON.parse(arrayMatch[0]);
-      if (Array.isArray(people)) {
-        return res.status(200).json({ people });
+      try {
+        const parsed = JSON.parse(arrayMatch[0]);
+        if (Array.isArray(parsed)) people = parsed;
+      } catch (e) {
+        console.error('Failed to parse JSON array from vision response');
       }
     }
-    throw new Error('Invalid JSON from vision model');
+
+    // If we still have nothing, try parsing the entire cleaned text as JSON
+    if (!people.length) {
+      try {
+        const parsed = JSON.parse(cleaned);
+        if (Array.isArray(parsed)) people = parsed;
+        else if (parsed.people) people = parsed.people;
+      } catch (e) {}
+    }
+
+    console.log('Vision extracted people:', people.length);
+    return res.status(200).json({ people });
   } catch (error) {
     console.error('Vision scan error:', error);
-    return res.status(500).json({ error: error.message });
+    // Return empty so the fallback takes over gracefully
+    return res.status(200).json({ people: [] });
   }
-    }
+        }
