@@ -30,7 +30,6 @@ export default function ScanPage() {
       img.onload = () => {
         URL.revokeObjectURL(objectUrl);
 
-        // Max dimension 800px for speed
         const MAX_WIDTH = 800;
         const MAX_HEIGHT = 800;
         let width = img.width;
@@ -56,22 +55,15 @@ export default function ScanPage() {
 
         // 1. Grayscale + contrast boost
         for (let i = 0; i < data.length; i += 4) {
-          // Convert to grayscale using luminance weights
           let gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-          // Increase contrast – make dark darker, light lighter
-          gray = ((gray - 128) * 1.4) + 128;   // contrast factor 1.4
-          // Clamp
+          gray = ((gray - 128) * 1.4) + 128;
           gray = Math.min(255, Math.max(0, gray));
           data[i] = data[i + 1] = data[i + 2] = gray;
         }
         ctx.putImageData(imageData, 0, 0);
 
-        // 2. Subtle sharpen using convolution
-        const sharpenKernel = [
-          0, -1, 0,
-          -1, 5, -1,
-          0, -1, 0
-        ];
+        // 2. Sharpen using convolution
+        const sharpenKernel = [0, -1, 0, -1, 5, -1, 0, -1, 0];
         const sharpenedData = ctx.getImageData(0, 0, width, height);
         const outputData = new Uint8ClampedArray(sharpenedData.data);
         for (let y = 1; y < height - 1; y++) {
@@ -95,7 +87,7 @@ export default function ScanPage() {
         const sharpImageData = new ImageData(outputData, width, height);
         ctx.putImageData(sharpImageData, 0, 0);
 
-        // Convert to base64 JPEG at quality 0.7
+        // Convert to base64 JPEG
         canvas.toBlob(
           (blob) => {
             if (!blob) { reject(new Error('Canvas toBlob failed')); return; }
@@ -120,6 +112,7 @@ export default function ScanPage() {
     });
   };
 
+  // ---------- SCAN HANDLER (vision first, fallback OCR) ----------
   const handleFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -127,20 +120,42 @@ export default function ScanPage() {
 
     updateState({ status: 'processing', message: 'Enhancing image...' });
     setScanningLine(true);
+
     try {
       const base64 = await preprocessImage(file);
-      updateState({ message: 'Scanning names...' });
 
-      const res = await fetch('/api/attendance/scan-base64', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          church_id: 'demo-org',
-          program_name: programName.trim() || 'GIBEON',
-          image_base64: base64,
-        }),
-      });
-      const data = await res.json();
+      // Try vision model first
+      let data;
+      try {
+        const visionRes = await fetch('/api/ai/vision-scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_base64: base64 }),
+        });
+        if (visionRes.ok) {
+          const visionData = await visionRes.json();
+          if (visionData.people && visionData.people.length > 0) {
+            data = visionData;
+            console.log('Used vision model');
+          }
+        }
+      } catch (visionErr) {
+        console.log('Vision model failed, falling back to OCR+Groq');
+      }
+
+      // Fallback to OCR + correction
+      if (!data) {
+        const ocrRes = await fetch('/api/attendance/scan-base64', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            church_id: 'demo-org',
+            program_name: programName.trim() || 'GIBEON',
+            image_base64: base64,
+          }),
+        });
+        data = await ocrRes.json();
+      }
 
       if (data.status === 'ok') {
         setResults(data);
@@ -192,7 +207,6 @@ export default function ScanPage() {
               />
             </div>
 
-            {/* Pre‑scan capture tip */}
             <div style={tipStyle}>
               💡 <strong>Capture tip:</strong> Make sure the full page is visible — no torn, folded, or cut‑off edges — and good lighting.
             </div>
@@ -271,7 +285,7 @@ export default function ScanPage() {
   );
 }
 
-// Styles (unchanged)
+// ---------- Styles ----------
 const heading = { fontSize: 28, fontWeight: 700, color: '#f0f0f0', marginBottom: 8 };
 const subheading = { color: 'rgba(255,255,255,0.6)', marginBottom: 25 };
 const inputStyle = {
