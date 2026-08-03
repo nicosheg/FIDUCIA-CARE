@@ -21,7 +21,7 @@ export default function ScanPage() {
     setScanStateLocal(prev => ({ ...prev, ...newState }));
   };
 
-  // ---------- PREPROCESSING (grayscale, contrast, sharpen) ----------
+  // ---------- PREPROCESSING (same as before) ----------
   const preprocessImage = (file) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -29,7 +29,6 @@ export default function ScanPage() {
       img.src = objectUrl;
       img.onload = () => {
         URL.revokeObjectURL(objectUrl);
-
         const MAX_WIDTH = 800;
         const MAX_HEIGHT = 800;
         let width = img.width;
@@ -42,18 +41,15 @@ export default function ScanPage() {
           width = (width * MAX_HEIGHT) / height;
           height = MAX_HEIGHT;
         }
-
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Apply image processing
+        // Image processing
         const imageData = ctx.getImageData(0, 0, width, height);
         const data = imageData.data;
-
-        // 1. Grayscale + contrast boost
         for (let i = 0; i < data.length; i += 4) {
           let gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
           gray = ((gray - 128) * 1.4) + 128;
@@ -61,8 +57,6 @@ export default function ScanPage() {
           data[i] = data[i + 1] = data[i + 2] = gray;
         }
         ctx.putImageData(imageData, 0, 0);
-
-        // 2. Sharpen using convolution
         const sharpenKernel = [0, -1, 0, -1, 5, -1, 0, -1, 0];
         const sharpenedData = ctx.getImageData(0, 0, width, height);
         const outputData = new Uint8ClampedArray(sharpenedData.data);
@@ -87,7 +81,6 @@ export default function ScanPage() {
         const sharpImageData = new ImageData(outputData, width, height);
         ctx.putImageData(sharpImageData, 0, 0);
 
-        // Convert to base64 JPEG
         canvas.toBlob(
           (blob) => {
             if (!blob) { reject(new Error('Canvas toBlob failed')); return; }
@@ -112,7 +105,6 @@ export default function ScanPage() {
     });
   };
 
-  // ---------- SCAN HANDLER (vision first, fallback OCR) ----------
   const handleFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -124,44 +116,18 @@ export default function ScanPage() {
     try {
       const base64 = await preprocessImage(file);
 
-      // Try vision model first
-      let data;
-      try {
-        const visionRes = await fetch('/api/ai/vision-scan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            image_base64: base64,
-            church_id: 'demo-org',
-            program_name: programName.trim() || 'GIBEON',
-          }),
-        });
-        if (visionRes.ok) {
-          const visionData = await visionRes.json();
-          if (visionData.status === 'ok' && visionData.people && visionData.people.length > 0) {
-            data = visionData;
-            console.log('Used vision model');
-          }
-        }
-      } catch (visionErr) {
-        console.log('Vision model failed, falling back to OCR+Groq');
-      }
+      const res = await fetch('/api/ai/vision-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_base64: base64,
+          church_id: 'demo-org',
+          program_name: programName.trim() || 'GIBEON',
+        }),
+      });
+      const data = await res.json();
 
-      // Fallback to OCR + correction if vision didn't work
-      if (!data) {
-        const ocrRes = await fetch('/api/attendance/scan-base64', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            church_id: 'demo-org',
-            program_name: programName.trim() || 'GIBEON',
-            image_base64: base64,
-          }),
-        });
-        data = await ocrRes.json();
-      }
-
-      if (data && data.status === 'ok') {
+      if (data.status === 'ok') {
         setResults(data);
         updateState({
           status: 'success',
@@ -174,7 +140,7 @@ export default function ScanPage() {
       } else {
         updateState({
           status: 'error',
-          message: '❌ ' + (data?.error || 'Scan failed'),
+          message: '❌ ' + (data.error || 'Scan failed'),
         });
       }
     } catch (err) {
