@@ -1,307 +1,248 @@
-import { useState, useRef, useEffect } from 'react';
-import { useRouter } from 'next/router';
-import Layout from '../components/Layout';
-import { getScanState, setScanState, clearScanState } from '../lib/scanStore';
+import pool from '../../../lib/db';
 
-export default function ScanPage() {
-  const router = useRouter();
-  const fileInputRef = useRef(null);
-  const [scanState, setScanStateLocal] = useState(getScanState());
-  const [programName, setProgramName] = useState('GIBEON');
-  const [results, setResults] = useState(null);
-  const [scanningLine, setScanningLine] = useState(false);
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_VISION_MODEL = process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
-  useEffect(() => {
-    const state = getScanState();
-    setScanStateLocal(state);
-  }, []);
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).end();
 
-  const updateState = (newState) => {
-    setScanState(newState);
-    setScanStateLocal(prev => ({ ...prev, ...newState }));
-  };
+  const { image_base64, church_id, program_name } = req.body;
+  if (!image_base64) return res.status(400).json({ error: 'No image data' });
 
-  // ---------- PREPROCESSING (same as before) ----------
-  const preprocessImage = (file) => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      const objectUrl = URL.createObjectURL(file);
-      img.src = objectUrl;
-      img.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-        const MAX_WIDTH = 800;
-        const MAX_HEIGHT = 800;
-        let width = img.width;
-        let height = img.height;
-        if (width > MAX_WIDTH) {
-          height = (height * MAX_WIDTH) / width;
-          width = MAX_WIDTH;
-        }
-        if (height > MAX_HEIGHT) {
-          width = (width * MAX_HEIGHT) / height;
-          height = MAX_HEIGHT;
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
+  const orgId = church_id || 'demo-org';
+  const programName = program_name || 'GIBEON';
 
-        // Image processing
-        const imageData = ctx.getImageData(0, 0, width, height);
-        const data = imageData.data;
-        for (let i = 0; i < data.length; i += 4) {
-          let gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-          gray = ((gray - 128) * 1.4) + 128;
-          gray = Math.min(255, Math.max(0, gray));
-          data[i] = data[i + 1] = data[i + 2] = gray;
-        }
-        ctx.putImageData(imageData, 0, 0);
-        const sharpenKernel = [0, -1, 0, -1, 5, -1, 0, -1, 0];
-        const sharpenedData = ctx.getImageData(0, 0, width, height);
-        const outputData = new Uint8ClampedArray(sharpenedData.data);
-        for (let y = 1; y < height - 1; y++) {
-          for (let x = 1; x < width - 1; x++) {
-            let r = 0, g = 0, b = 0;
-            for (let ky = -1; ky <= 1; ky++) {
-              for (let kx = -1; kx <= 1; kx++) {
-                const idx = ((y + ky) * width + (x + kx)) * 4;
-                const weight = sharpenKernel[(ky + 1) * 3 + (kx + 1)];
-                r += sharpenedData.data[idx] * weight;
-                g += sharpenedData.data[idx + 1] * weight;
-                b += sharpenedData.data[idx + 2] * weight;
-              }
-            }
-            const i = (y * width + x) * 4;
-            outputData[i] = Math.min(255, Math.max(0, r));
-            outputData[i + 1] = Math.min(255, Math.max(0, g));
-            outputData[i + 2] = Math.min(255, Math.max(0, b));
-          }
-        }
-        const sharpImageData = new ImageData(outputData, width, height);
-        ctx.putImageData(sharpImageData, 0, 0);
+  const systemPrompt = `You are an AI assistant for FIDUCIA CARE. This is a photo of a church attendance register with two columns: Names and Phone Numbers. Extract each person as a structured JSON array with 'name' and 'phone' fields. Normalize phone numbers to +234XXXXXXXXXX format (remove spaces/symbols). If a name or phone number is unclear, leave it empty rather than guessing. **Do not include any reasoning or explanation.** Return ONLY the JSON array, no other text.`;
 
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) { reject(new Error('Canvas toBlob failed')); return; }
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              const base64 = reader.result.split(',')[1];
-              canvas.width = 0;
-              canvas.height = 0;
-              resolve(base64);
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
+  const callVision = async () => {
+    const response = await fetch(GROQ_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_VISION_MODEL,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: { url: `data:image/jpeg;base64,${image_base64}` },
+              },
+            ],
           },
-          'image/jpeg',
-          0.7
-        );
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(objectUrl);
-        reject(new Error('Image loading failed'));
-      };
+        ],
+        temperature: 0,
+        max_tokens: 4000,
+        response_format: { type: 'json_object' },
+      }),
     });
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(err.error?.message || 'Groq vision API error');
+    }
+
+    return await response.json();
   };
 
-  const handleFile = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    e.target.value = null;
-
-    updateState({ status: 'processing', message: 'Enhancing image...' });
-    setScanningLine(true);
+  const parseResponse = (rawContent) => {
+    let people = [];
+    let jsonStr = rawContent;
+    if (rawContent.includes('</think>')) {
+      jsonStr = rawContent.split('</think>')[1].trim();
+    }
+    jsonStr = jsonStr.replace(/```json|```/g, '').trim();
 
     try {
-      const base64 = await preprocessImage(file);
-
-      const res = await fetch('/api/ai/vision-scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_base64: base64,
-          church_id: 'demo-org',
-          program_name: programName.trim() || 'GIBEON',
-        }),
-      });
-      const data = await res.json();
-
-      if (data.status === 'ok') {
-        setResults(data);
-        updateState({
-          status: 'success',
-          message: `✅ Scan complete! ${data.present_count} present (${data.new_members} new).`,
-        });
-        setTimeout(() => {
-          clearScanState();
-          router.push('/community');
-        }, 2000);
-      } else {
-        updateState({
-          status: 'error',
-          message: '❌ ' + (data.error || 'Scan failed'),
-        });
+      const parsed = JSON.parse(jsonStr);
+      if (Array.isArray(parsed)) {
+        people = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        const arr = Object.values(parsed).find(Array.isArray);
+        if (arr) people = arr;
       }
-    } catch (err) {
-      updateState({
-        status: 'error',
-        message: '❌ ' + err.message,
-      });
+    } catch (e) {
+      const arrayMatch = jsonStr.match(/\[[\s\S]*\]/);
+      if (arrayMatch) {
+        try {
+          const parsed = JSON.parse(arrayMatch[0]);
+          if (Array.isArray(parsed)) people = parsed;
+        } catch {}
+      }
     }
-    setScanningLine(false);
+
+    return people;
   };
 
-  const today = new Date().toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-  });
+  const normalizePhone = (phone) => {
+    let cleaned = phone.replace(/[^\d+]/g, '');
+    if (cleaned.startsWith('0')) cleaned = '+234' + cleaned.substring(1);
+    if (cleaned.startsWith('234') && !cleaned.startsWith('+')) cleaned = '+' + cleaned;
+    // Remove obviously incomplete numbers
+    if (cleaned === '+234' || cleaned.length < 10) cleaned = '';
+    return cleaned;
+  };
 
-  return (
-    <Layout>
-      <div style={{ maxWidth: 600, margin: '40px auto', padding: '0 20px', textAlign: 'center' }}>
-        <h1 style={heading}>Scan Attendance</h1>
-        <p style={subheading}>{today}</p>
+  // --- Main execution with retry ---
+  let people = [];
+  try {
+    // First attempt
+    let data;
+    try {
+      data = await callVision();
+    } catch (err) {
+      console.error('Vision call 1 failed:', err.message);
+    }
 
-        {scanState.status === 'idle' && (
-          <>
-            <div style={{ marginBottom: 25 }}>
-              <label style={{ fontWeight: 600, display: 'block', marginBottom: 8, color: '#f0f0f0' }}>
-                Program / Event Name
-              </label>
-              <input
-                type="text"
-                value={programName}
-                onChange={e => setProgramName(e.target.value)}
-                placeholder="e.g., GIBEON"
-                style={inputStyle}
-              />
-            </div>
+    if (data) {
+      const rawContent = data.choices[0].message.content;
+      console.log('Vision raw response:', rawContent);
+      people = parseResponse(rawContent);
+    }
 
-            <div style={tipStyle}>
-              💡 <strong>Capture tip:</strong> Make sure the full page is visible — no torn, folded, or cut‑off edges — and good lighting.
-            </div>
+    // Retry once if empty
+    if (!people || people.length === 0) {
+      console.log('Vision first attempt yielded no people, retrying...');
+      try {
+        const retryData = await callVision();
+        const rawContent = retryData.choices[0].message.content;
+        console.log('Vision retry raw response:', rawContent);
+        people = parseResponse(rawContent);
+      } catch (err) {
+        console.error('Vision retry failed:', err.message);
+      }
+    }
 
-            <label htmlFor="cameraInput" style={{ cursor: 'pointer', display: 'inline-block' }}>
-              <div style={cameraBtn}>
-                📷 Take Photo of Register
-              </div>
-            </label>
-            <input
-              ref={fileInputRef}
-              id="cameraInput"
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleFile}
-              style={{ display: 'none' }}
-            />
-          </>
-        )}
+    // Filter out obvious non‑people and duplicates
+    const seen = new Set();
+    const uniquePeople = [];
+    for (const p of people) {
+      const name = (p.name || '').trim();
+      const phone = normalizePhone(p.phone || '');
+      if (!name || /^[0-9+\-\s]+$/.test(name)) continue; // skip numeric‑only names
+      if (name.toLowerCase() === 'names' || name.toLowerCase() === 'phone number') continue;
+      if (phone === '+234' || phone.length < 10) continue; // skip bare/incomplete phones
 
-        {scanState.status !== 'idle' && (
-          <div style={resultCard}>
-            {scanningLine && (
-              <div style={scanLineContainer}>
-                <div style={scanLine} />
-              </div>
-            )}
+      const key = `${name}|${phone}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniquePeople.push({ name, phone, confidence: 85 });
+      }
+      if (uniquePeople.length >= 50) break; // safety valve
+    }
 
-            <p style={{ fontSize: 18, fontWeight: 600, marginBottom: 12 }}>
-              {scanState.status === 'processing' ? '⏳' : ''} {scanState.message}
-            </p>
+    console.log('Vision extracted people:', uniquePeople.length);
 
-            {results?.people && scanState.status === 'success' && (
-              <>
-                <div style={{ marginBottom: 12, color: '#34D399' }}>
-                  {results.people.length} people found:
-                </div>
-                <div style={{ maxHeight: 200, overflowY: 'auto', fontSize: 14 }}>
-                  {results.people.map((p, i) => (
-                    <div key={i} style={confidenceRow}>
-                      <span style={{ flex: 2 }}>{p.first_name || p.name}</span>
-                      <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.1)', margin: '0 10px' }}>
-                        <div style={{
-                          width: `${p.confidence}%`,
-                          height: '100%',
-                          borderRadius: 3,
-                          background: p.confidence >= 90 ? '#34D399' : p.confidence >= 80 ? '#D4AF37' : '#EF4444',
-                          transition: 'width 0.3s',
-                        }} />
-                      </div>
-                      <span style={{ flex: 0.5, textAlign: 'right', fontWeight: 600, color: p.confidence >= 90 ? '#34D399' : p.confidence >= 80 ? '#D4AF37' : '#EF4444' }}>
-                        {p.confidence}%
-                      </span>
-                      <span style={{ flex: 1.5, textAlign: 'right', color: 'rgba(255,255,255,0.6)' }}>
-                        {p.phone || (p.phone_unclear ? '⚠️' : '—')}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <button onClick={() => { clearScanState(); router.push('/community'); }} style={viewBtn}>
-                  View Community →
-                </button>
-              </>
-            )}
+    if (uniquePeople.length === 0) {
+      return res.status(200).json({ status: 'failed', error: 'No people extracted' });
+    }
 
-            {scanState.status === 'error' && (
-              <button onClick={() => { clearScanState(); setResults(null); }} style={retryBtn}>
-                Try Again
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </Layout>
-  );
-}
+    // --- Insert into database ---
+    const client = await pool.connect();
+    const savedPeople = [];
+    let newMembersCount = 0;
 
-// ---------- Styles ----------
-const heading = { fontSize: 28, fontWeight: 700, color: '#f0f0f0', marginBottom: 8 };
-const subheading = { color: 'rgba(255,255,255,0.6)', marginBottom: 25 };
-const inputStyle = {
-  padding: '12px 16px', fontSize: 16, borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)',
-  backdropFilter: 'blur(5px)', color: '#fff', width: '100%', maxWidth: 300,
-  textAlign: 'center', outline: 'none',
-};
-const cameraBtn = {
-  background: 'rgba(212,175,55,0.1)', border: '1px solid rgba(212,175,55,0.2)',
-  color: '#D4AF37', padding: '18px 40px', borderRadius: 16, fontSize: 20,
-  fontWeight: 600, backdropFilter: 'blur(10px)', transition: 'transform 0.2s',
-};
-const resultCard = {
-  marginTop: 30, padding: 16, borderRadius: 16, backdropFilter: 'blur(10px)',
-  background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
-  color: '#f0f0f0', textAlign: 'left',
-};
-const scanLineContainer = {
-  height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.03)', marginBottom: 15, overflow: 'hidden',
-};
-const scanLine = {
-  width: '30%', height: '100%', background: '#D4AF37',
-  animation: 'scanMove 1.5s ease-in-out infinite', borderRadius: 2,
-};
-const confidenceRow = {
-  display: 'flex', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)',
-};
-const viewBtn = {
-  marginTop: 15, width: '100%', padding: '12px', background: '#D4AF37',
-  color: '#0A0F1A', border: 'none', borderRadius: 10, fontWeight: 600, cursor: 'pointer',
-};
-const retryBtn = {
-  marginTop: 10, padding: '10px 20px', background: 'transparent',
-  border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444',
-  borderRadius: 10, fontWeight: 600, cursor: 'pointer',
-};
-const tipStyle = {
-  marginBottom: 20,
-  padding: '10px 16px',
-  borderRadius: 12,
-  background: 'rgba(255,255,255,0.03)',
-  border: '1px solid rgba(255,255,255,0.06)',
-  color: 'rgba(255,255,255,0.6)',
-  fontSize: 14,
-  maxWidth: 350,
-  margin: '0 auto 25px',
-  textAlign: 'left',
-};
+    for (const person of uniquePeople) {
+      const fullName = person.name;
+      const phone = person.phone;
+
+      try {
+        const insertRes = await client.query(
+          `INSERT INTO people (organization_id, first_name, last_name, phone, type, status, confidence)
+           VALUES ($1, $2, '', $3, 'visitor', 'active', $4)
+           RETURNING id`,
+          [orgId, fullName, phone, person.confidence || 85]
+        );
+        const memberId = insertRes.rows[0].id;
+        savedPeople.push(memberId);
+        newMembersCount++;
+        console.log(`Inserted ${fullName} with id ${memberId}`);
+      } catch (insertErr) {
+        console.error(`Insert error for ${fullName}:`, insertErr.message);
+        if (phone) {
+          const existing = await client.query(
+            `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 LIMIT 1`,
+            [orgId, phone]
+          );
+          if (existing.rows.length > 0) {
+            savedPeople.push(existing.rows[0].id);
+            await client.query(`UPDATE people SET first_name = $1, confidence = $2 WHERE id = $3`,
+              [fullName, person.confidence || 85, existing.rows[0].id]);
+          }
+        }
+      }
+    }
+
+    // Record attendance
+    const today = new Date().toISOString().slice(0, 10);
+    let sessionId;
+    let sessionRes = await client.query(
+      `SELECT id FROM sessions WHERE church_id = $1 AND name = $2 AND created_at::date = $3`,
+      [orgId, programName, today]
+    );
+    if (sessionRes.rows.length === 0) {
+      const newSession = await client.query(
+        `INSERT INTO sessions (church_id, name, status) VALUES ($1, $2, 'active') RETURNING id`,
+        [orgId, programName]
+      );
+      sessionId = newSession.rows[0].id;
+      await client.query(`INSERT INTO session_sections (session_id, name) VALUES ($1, 'All')`, [sessionId]);
+    } else {
+      sessionId = sessionRes.rows[0].id;
+    }
+    const sectionRes = await client.query(
+      `SELECT id FROM session_sections WHERE session_id = $1 AND name = 'All'`,
+      [sessionId]
+    );
+    const sectionId = sectionRes.rows[0].id;
+
+    for (const personId of savedPeople) {
+      await client.query(
+        `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
+         VALUES ($1, $2, true, $3)
+         ON CONFLICT (member_id, attendance_date) DO UPDATE SET present = true`,
+        [personId, today, sectionId]
+      );
+      await client.query(
+        `INSERT INTO timeline_events (person_id, organization_id, event_type, description, metadata)
+         VALUES ($1, $2, 'attendance', 'Present at ' || $3, ('{"program": "' || $3 || '"}')::jsonb)`,
+        [personId, orgId, programName]
+      );
+    }
+
+    // Mark others absent
+    const allActive = await client.query(
+      `SELECT id FROM people WHERE organization_id = $1 AND status = 'active'`,
+      [orgId]
+    );
+    const allActiveIds = allActive.rows.map(r => r.id);
+    for (const id of allActiveIds) {
+      if (!savedPeople.includes(id)) {
+        await client.query(
+          `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
+           VALUES ($1, $2, false, $3)
+           ON CONFLICT (member_id, attendance_date) DO NOTHING`,
+          [id, today, sectionId]
+        );
+      }
+    }
+
+    client.release();
+
+    return res.status(200).json({
+      status: 'ok',
+      present_count: savedPeople.length,
+      absent_count: allActiveIds.length - savedPeople.length,
+      new_members: newMembersCount,
+      people: uniquePeople,
+    });
+  } catch (error) {
+    console.error('Vision scan error:', error);
+    return res.status(200).json({ status: 'failed', error: error.message });
+  }
+      }
