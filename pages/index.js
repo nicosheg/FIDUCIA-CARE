@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [moment, setMoment] = useState('');
+  const [ariaObservation, setAriaObservation] = useState('');
   const orgId = 'demo-org';
 
   useEffect(() => {
@@ -11,16 +12,21 @@ export default function Dashboard() {
       .then(r => r.json())
       .then(data => {
         setStats(data);
-        // Build the Moment sentence
-        const parts = [];
-        if (data.needCare && data.needCare > 0) {
-          parts.push(`${data.needCare} people may need your attention today.`);
+        const p = data.present_count || 0;
+        const a = data.absent_count || 0;
+        if (p + a === 0) {
+          setMoment('Welcome. ARIA is ready to help you care for every life.');
+        } else {
+          const parts = [];
+          if (p > 0) parts.push(`${p} people connected today.`);
+          if (a > 0) parts.push(`${a} may need your attention.`);
+          setMoment(parts.join(' '));
         }
-        if (data.todaysCommunity > 0) {
-          parts.unshift(`${data.todaysCommunity} are with us today.`);
-        }
-        if (parts.length === 0) parts.push('Everything is calm today.');
-        setMoment(parts.join(' '));
+        // Delayed ARIA observation
+        setTimeout(() => {
+          if (a > 3) setAriaObservation('A few people haven’t been seen for a while.');
+          else if (p > 20) setAriaObservation('Today’s gathering looks healthy.');
+        }, 1500);
       });
   }, []);
 
@@ -28,39 +34,26 @@ export default function Dashboard() {
 
   return (
     <Layout>
-      <div style={container}>
-        {/* The Moment */}
+      <div style={{ maxWidth: 700, margin: '0 auto', padding: '40px 20px' }}>
         <div style={momentCard}>
           <p style={momentText}>{moment}</p>
         </div>
 
-        {/* Key indicators */}
-        <div style={keyGrid}>
-          <Indicator
-            icon="🛡️"
-            label="Today's Community"
-            value={stats.todaysCommunity || 0}
-            color="#D4AF37"
-          />
-          <Indicator
-            icon="❤️"
-            label="Need Care"
-            value={stats.needCare || 0}
-            color="#EF4444"
-          />
+        <div style={{ display: 'flex', gap: 20, marginBottom: 30, flexWrap: 'wrap' }}>
+          <Indicator icon="👥" label="Today's Community" value={stats.present_count} color="#D4AF37" />
+          <Indicator icon="❤️" label="Need Attention" value={stats.absent_count} color="#EF4444" />
         </div>
 
-        {/* Journey button – leads to full community */}
-        <a href="/community" style={journeyBtn}>
-          See all 28 lives remembered →
-        </a>
-
-        {/* Ambient AI insight */}
-        {stats.ambientInsight && (
-          <div style={ambientBox}>
-            <p style={ambientText}>{stats.ambientInsight}</p>
+        {ariaObservation && (
+          <div style={observationCard}>
+            <p style={{ color: 'rgba(255,255,255,0.7)', fontStyle: 'italic', margin: 0 }}>{ariaObservation}</p>
           </div>
         )}
+
+        <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+          <a href="/scan" style={glassBtn}>📷 Scan Register</a>
+          <a href="/community" style={glassBtn}>👥 Community</a>
+        </div>
       </div>
     </Layout>
   );
@@ -68,62 +61,33 @@ export default function Dashboard() {
 
 function Indicator({ icon, label, value, color }) {
   return (
-    <div style={indicatorCard}>
-      <div style={indicatorIcon}>{icon}</div>
-      <div style={indicatorValue}>{value}</div>
-      <div style={indicatorLabel}>{label}</div>
+    <div style={indCard}>
+      <div style={{ fontSize: 32, marginBottom: 8 }}>{icon}</div>
+      <div style={{ fontSize: 42, fontWeight: 700, color }}>{value}</div>
+      <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginTop: 4 }}>{label}</div>
     </div>
   );
 }
 
-// Styling
-const container = { maxWidth: 700, margin: '0 auto', padding: '30px 20px' };
 const momentCard = {
-  background: 'rgba(255,255,255,0.02)',
-  backdropFilter: 'blur(20px)',
-  borderRadius: 24,
-  padding: '24px 28px',
-  marginBottom: 30,
+  background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(20px)',
+  borderRadius: 24, padding: '24px 28px', marginBottom: 30,
+  border: '1px solid rgba(255,255,255,0.06)',
+};
+const momentText = { fontSize: 22, color: '#D4AF37', margin: 0, fontWeight: 400, lineHeight: 1.5 };
+const indCard = {
+  flex: 1, minWidth: 150, background: 'rgba(255,255,255,0.03)',
+  backdropFilter: 'blur(20px)', borderRadius: 20, padding: '24px 20px',
+  textAlign: 'center', border: '1px solid rgba(255,255,255,0.06)',
+};
+const observationCard = {
+  background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(10px)',
+  borderRadius: 16, padding: '14px 20px', marginBottom: 15,
   border: '1px solid rgba(255,255,255,0.04)',
 };
-const momentText = {
-  fontSize: 20,
-  color: '#D4AF37',
-  margin: 0,
-  fontWeight: 400,
-  lineHeight: 1.5,
+const glassBtn = {
+  padding: '12px 24px', background: 'rgba(255,255,255,0.03)',
+  backdropFilter: 'blur(10px)', borderRadius: 14, color: '#D4AF37',
+  textDecoration: 'none', fontWeight: 500, border: '1px solid rgba(255,255,255,0.08)',
+  display: 'inline-block',
 };
-const keyGrid = { display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 30 };
-const indicatorCard = {
-  flex: 1, minWidth: 140,
-  background: 'rgba(255,255,255,0.02)',
-  backdropFilter: 'blur(20px)',
-  borderRadius: 20,
-  padding: '24px 20px',
-  textAlign: 'center',
-  border: '1px solid rgba(255,255,255,0.04)',
-};
-const indicatorIcon = { fontSize: 28, marginBottom: 8 };
-const indicatorValue = { fontSize: 42, fontWeight: 700, color: '#f0f0f0' };
-const indicatorLabel = { fontSize: 13, color: 'rgba(255,255,255,0.6)', marginTop: 4 };
-const journeyBtn = {
-  display: 'block',
-  textAlign: 'center',
-  padding: '14px 0',
-  color: '#D4AF37',
-  textDecoration: 'none',
-  fontWeight: 500,
-  fontSize: 15,
-  border: '1px solid rgba(212,175,55,0.2)',
-  borderRadius: 14,
-  background: 'rgba(212,175,55,0.05)',
-  marginBottom: 20,
-};
-const ambientBox = {
-  background: 'rgba(255,255,255,0.02)',
-  backdropFilter: 'blur(20px)',
-  borderRadius: 16,
-  padding: '14px 20px',
-  border: '1px solid rgba(255,255,255,0.04)',
-};
-const ambientText = { color: 'rgba(255,255,255,0.6)', fontSize: 14, margin: 0 };
