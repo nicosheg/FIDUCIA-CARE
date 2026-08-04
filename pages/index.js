@@ -22,10 +22,9 @@ export default function Dashboard() {
           if (a > 0) parts.push(`${a} may need your attention.`);
           setMoment(parts.join(' '));
         }
-        // Delayed ARIA observation
         setTimeout(() => {
           if (a > 3) setAriaObservation('A few people haven’t been seen for a while.');
-          else if (p > 20) setAriaObservation('Today’s gathering looks healthy.');
+          else if (p > 20) setAriaObservation('Today’s gathering looks healthier than last week.');
         }, 1500);
       });
   }, []);
@@ -35,59 +34,90 @@ export default function Dashboard() {
   return (
     <Layout>
       <div style={{ maxWidth: 700, margin: '0 auto', padding: '40px 20px' }}>
+        {/* The Moment */}
         <div style={momentCard}>
           <p style={momentText}>{moment}</p>
         </div>
 
+        {/* Key indicators */}
         <div style={{ display: 'flex', gap: 20, marginBottom: 30, flexWrap: 'wrap' }}>
-          <Indicator icon="👥" label="Today's Community" value={stats.present_count} color="#D4AF37" />
-          <Indicator icon="❤️" label="Need Attention" value={stats.absent_count} color="#EF4444" />
+          <Indicator label="Today's Community" value={stats.present_count} color="#D4AF37" />
+          <Indicator label="Need Attention" value={stats.absent_count} color="#EF4444" />
         </div>
 
+        {/* ARIA observation (sparse) */}
         {ariaObservation && (
           <div style={observationCard}>
             <p style={{ color: 'rgba(255,255,255,0.7)', fontStyle: 'italic', margin: 0 }}>{ariaObservation}</p>
           </div>
         )}
 
+        {/* Primary actions */}
         <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-          <a href="/scan" style={glassBtn}>📷 Scan Register</a>
-          <a href="/community" style={glassBtn}>👥 Community</a>
+          <a href="/scan" style={actionBtn}>Scan Register</a>
+          <a href="/community" style={actionBtn}>Community</a>
         </div>
       </div>
     </Layout>
   );
 }
 
-function Indicator({ icon, label, value, color }) {
+function Indicator({ label, value, color }) {
   return (
     <div style={indCard}>
-      <div style={{ fontSize: 32, marginBottom: 8 }}>{icon}</div>
+      <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 42, fontWeight: 700, color }}>{value}</div>
-      <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginTop: 4 }}>{label}</div>
     </div>
   );
 }
 
+// Styles – no glassmorphism, just dark polished cards
 const momentCard = {
-  background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(20px)',
-  borderRadius: 24, padding: '24px 28px', marginBottom: 30,
-  border: '1px solid rgba(255,255,255,0.06)',
+  background: 'rgba(20, 25, 40, 0.9)',
+  borderRadius: 20,
+  padding: '24px 28px',
+  marginBottom: 30,
+  border: '1px solid rgba(255,255,255,0.05)',
+  boxShadow: '0 0 20px rgba(212,175,55,0.05)',
 };
-const momentText = { fontSize: 22, color: '#D4AF37', margin: 0, fontWeight: 400, lineHeight: 1.5 };
+
+const momentText = {
+  fontSize: 22,
+  color: '#D4AF37',
+  margin: 0,
+  fontWeight: 400,
+  lineHeight: 1.5,
+};
+
 const indCard = {
-  flex: 1, minWidth: 150, background: 'rgba(255,255,255,0.03)',
-  backdropFilter: 'blur(20px)', borderRadius: 20, padding: '24px 20px',
-  textAlign: 'center', border: '1px solid rgba(255,255,255,0.06)',
+  flex: 1,
+  minWidth: 150,
+  background: 'rgba(20,25,40,0.9)',
+  borderRadius: 20,
+  padding: '24px 20px',
+  textAlign: 'center',
+  border: '1px solid rgba(255,255,255,0.05)',
+  boxShadow: '0 0 15px rgba(212,175,55,0.03)',
 };
+
 const observationCard = {
-  background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(10px)',
-  borderRadius: 16, padding: '14px 20px', marginBottom: 15,
+  background: 'rgba(20,25,40,0.7)',
+  borderRadius: 16,
+  padding: '14px 20px',
+  marginBottom: 15,
   border: '1px solid rgba(255,255,255,0.04)',
 };
-const glassBtn = {
-  padding: '12px 24px', background: 'rgba(255,255,255,0.03)',
-  backdropFilter: 'blur(10px)', borderRadius: 14, color: '#D4AF37',
-  textDecoration: 'none', fontWeight: 500, border: '1px solid rgba(255,255,255,0.08)',
+
+const actionBtn = {
+  padding: '12px 24px',
+  background: 'rgba(20,25,40,0.8)',
+  borderRadius: 14,
+  color: '#D4AF37',
+  textDecoration: 'none',
+  fontWeight: 500,
+  fontSize: 15,
+  border: '1px solid rgba(212,175,55,0.2)',
+  transition: 'all 0.2s',
   display: 'inline-block',
+  cursor: 'pointer',
 };
