@@ -41,6 +41,7 @@ export default function Layout({ children }) {
         @keyframes drift2 { 0%{transform:translateX(0)translateY(0)rotate(0)}50%{transform:translateX(4%)translateY(1%)rotate(-.5deg)}100%{transform:translateX(0)translateY(0)rotate(0)} }
         @keyframes drift3 { 0%{transform:translateX(0)translateY(0)rotate(0)}50%{transform:translateX(-5%)translateY(3%)rotate(.2deg)}100%{transform:translateX(0)translateY(0)rotate(0)} }
         @keyframes floatParticle { 0%{transform:translateY(0)translateX(0);opacity:0}10%{opacity:.8}90%{opacity:.8}100%{transform:translateY(-100vh)translateX(-50px);opacity:0} }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes scanMove { 0%{transform:translateX(-100%)}100%{transform:translateX(400%)} }
         body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; color:#e0e0e0; background:#0A0F1A; }
         * { box-sizing:border-box; }
