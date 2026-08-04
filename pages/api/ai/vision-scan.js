@@ -1,9 +1,13 @@
 import pool from '../../../lib/db';
+import { enqueueVisionJob } from '../../../lib/visionQueue';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const GROQ_VISION_MODEL = process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b';
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
+/**
+ * ARIA Vision Scan – extract names and phone numbers directly from a register photo.
+ */
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
@@ -13,9 +17,10 @@ export default async function handler(req, res) {
   const orgId = church_id || 'demo-org';
   const programName = program_name || 'GIBEON';
 
-  const systemPrompt = `You are an AI assistant for FIDUCIA CARE. This is a photo of a church attendance register with two columns: Names and Phone Numbers. Extract each person as a structured JSON array with 'name' and 'phone' fields. Normalize phone numbers to +234XXXXXXXXXX format (remove spaces/symbols). If a name or phone number is unclear, leave it empty rather than guessing. **Do not include any reasoning or explanation.** Return ONLY the JSON array, no other text.`;
+  // The actual vision API call (will be queued)
+  const visionTask = async () => {
+    const systemPrompt = `You are ARIA, an AI assistant for FIDUCIA CARE. This is a photo of a church attendance register with two columns: Names and Phone Numbers. Extract each person as a structured JSON array with 'name' and 'phone' fields. Normalize phone numbers to +234XXXXXXXXXX format (remove spaces/symbols). If a name or phone number is unclear, leave it empty rather than guessing. Return ONLY the JSON array, no other text.`;
 
-  const callVision = async () => {
     const response = await fetch(GROQ_URL, {
       method: 'POST',
       headers: {
@@ -29,10 +34,7 @@ export default async function handler(req, res) {
           {
             role: 'user',
             content: [
-              {
-                type: 'image_url',
-                image_url: { url: `data:image/jpeg;base64,${image_base64}` },
-              },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image_base64}` } },
             ],
           },
         ],
@@ -44,29 +46,53 @@ export default async function handler(req, res) {
 
     if (!response.ok) {
       const err = await response.json();
-      throw new Error(err.error?.message || 'Groq vision API error');
+      const msg = err.error?.message || 'Groq vision API error';
+      // Detect rate limit and throw special error so queue can retry
+      if (msg.includes('Please try again in')) {
+        const match = msg.match(/in (\d+\.?\d*)s/);
+        if (match) {
+          const waitSec = parseFloat(match[1]) + 2;
+          throw { rateLimit: true, waitSec, message: msg };
+        }
+      }
+      throw new Error(msg);
     }
 
     return await response.json();
   };
 
-  const parseResponse = (rawContent) => {
+  try {
+    // Enqueue the vision job – processes one at a time
+    const data = await enqueueVisionJob(visionTask);
+    const rawContent = data.choices[0].message.content;
+    console.log('ARIA raw response:', rawContent);
+
+    // ---------- Robust JSON parsing ----------
     let people = [];
     let jsonStr = rawContent;
-    if (rawContent.includes('</think>')) {
-      jsonStr = rawContent.split('</think>')[1].trim();
+
+    // Remove any thinking/reasoning block
+    if (jsonStr.includes('</think>')) {
+      jsonStr = jsonStr.split('</think>')[1].trim();
     }
+    // Remove markdown fences
     jsonStr = jsonStr.replace(/```json|```/g, '').trim();
 
+    // Try direct parse first (handles arrays, objects, and { people: [...] })
     try {
       const parsed = JSON.parse(jsonStr);
       if (Array.isArray(parsed)) {
         people = parsed;
       } else if (parsed && typeof parsed === 'object') {
-        const arr = Object.values(parsed).find(Array.isArray);
-        if (arr) people = arr;
+        if (parsed.people && Array.isArray(parsed.people)) {
+          people = parsed.people;
+        } else if (parsed.name) {
+          // Single person object – wrap in array
+          people = [parsed];
+        }
       }
-    } catch (e) {
+    } catch {
+      // If direct parse fails, try to extract a JSON array from the text
       const arrayMatch = jsonStr.match(/\[[\s\S]*\]/);
       if (arrayMatch) {
         try {
@@ -76,73 +102,40 @@ export default async function handler(req, res) {
       }
     }
 
-    return people;
-  };
+    // ---------- Normalize phone numbers and filter junk ----------
+    const normalizePhone = (phone) => {
+      let cleaned = String(phone || '').replace(/[^\d+]/g, '');
+      if (cleaned.startsWith('0')) cleaned = '+234' + cleaned.substring(1);
+      else if (cleaned.startsWith('234') && !cleaned.startsWith('+')) cleaned = '+' + cleaned;
+      if (cleaned === '+234' || cleaned.length < 10) cleaned = '';
+      return cleaned;
+    };
 
-  const normalizePhone = (phone) => {
-    let cleaned = phone.replace(/[^\d+]/g, '');
-    if (cleaned.startsWith('0')) cleaned = '+234' + cleaned.substring(1);
-    if (cleaned.startsWith('234') && !cleaned.startsWith('+')) cleaned = '+' + cleaned;
-    // Remove obviously incomplete numbers
-    if (cleaned === '+234' || cleaned.length < 10) cleaned = '';
-    return cleaned;
-  };
-
-  // --- Main execution with retry ---
-  let people = [];
-  try {
-    // First attempt
-    let data;
-    try {
-      data = await callVision();
-    } catch (err) {
-      console.error('Vision call 1 failed:', err.message);
-    }
-
-    if (data) {
-      const rawContent = data.choices[0].message.content;
-      console.log('Vision raw response:', rawContent);
-      people = parseResponse(rawContent);
-    }
-
-    // Retry once if empty
-    if (!people || people.length === 0) {
-      console.log('Vision first attempt yielded no people, retrying...');
-      try {
-        const retryData = await callVision();
-        const rawContent = retryData.choices[0].message.content;
-        console.log('Vision retry raw response:', rawContent);
-        people = parseResponse(rawContent);
-      } catch (err) {
-        console.error('Vision retry failed:', err.message);
-      }
-    }
-
-    // Filter out obvious non‑people and duplicates
     const seen = new Set();
     const uniquePeople = [];
     for (const p of people) {
       const name = (p.name || '').trim();
-      const phone = normalizePhone(p.phone || '');
-      if (!name || /^[0-9+\-\s]+$/.test(name)) continue; // skip numeric‑only names
+      const phone = normalizePhone(p.phone);
+      // Skip purely numeric names and headers
+      if (!name || /^[0-9+\-\s]+$/.test(name)) continue;
       if (name.toLowerCase() === 'names' || name.toLowerCase() === 'phone number') continue;
-      if (phone === '+234' || phone.length < 10) continue; // skip bare/incomplete phones
 
       const key = `${name}|${phone}`;
       if (!seen.has(key)) {
         seen.add(key);
         uniquePeople.push({ name, phone, confidence: 85 });
       }
-      if (uniquePeople.length >= 50) break; // safety valve
+      // Safety valve – never more than 50 people from a single scan
+      if (uniquePeople.length >= 50) break;
     }
 
-    console.log('Vision extracted people:', uniquePeople.length);
+    console.log('ARIA extracted people:', uniquePeople.length);
 
     if (uniquePeople.length === 0) {
-      return res.status(200).json({ status: 'failed', error: 'No people extracted' });
+      return res.status(200).json({ status: 'failed', error: 'ARIA could not read any names. Please try a clearer photo.' });
     }
 
-    // --- Insert into database ---
+    // ---------- Save to database ----------
     const client = await pool.connect();
     const savedPeople = [];
     let newMembersCount = 0;
@@ -161,9 +154,10 @@ export default async function handler(req, res) {
         const memberId = insertRes.rows[0].id;
         savedPeople.push(memberId);
         newMembersCount++;
-        console.log(`Inserted ${fullName} with id ${memberId}`);
+        console.log(`ARIA inserted ${fullName} (${phone})`);
       } catch (insertErr) {
         console.error(`Insert error for ${fullName}:`, insertErr.message);
+        // If phone already exists, reuse that ID
         if (phone) {
           const existing = await client.query(
             `SELECT id FROM people WHERE organization_id = $1 AND phone = $2 LIMIT 1`,
@@ -171,14 +165,16 @@ export default async function handler(req, res) {
           );
           if (existing.rows.length > 0) {
             savedPeople.push(existing.rows[0].id);
-            await client.query(`UPDATE people SET first_name = $1, confidence = $2 WHERE id = $3`,
-              [fullName, person.confidence || 85, existing.rows[0].id]);
+            await client.query(
+              `UPDATE people SET first_name = $1, confidence = $2 WHERE id = $3`,
+              [fullName, person.confidence || 85, existing.rows[0].id]
+            );
           }
         }
       }
     }
 
-    // Record attendance
+    // ---------- Record attendance & timeline ----------
     const today = new Date().toISOString().slice(0, 10);
     let sessionId;
     let sessionRes = await client.query(
@@ -215,7 +211,7 @@ export default async function handler(req, res) {
       );
     }
 
-    // Mark others absent
+    // Mark absentees
     const allActive = await client.query(
       `SELECT id FROM people WHERE organization_id = $1 AND status = 'active'`,
       [orgId]
@@ -242,7 +238,7 @@ export default async function handler(req, res) {
       people: uniquePeople,
     });
   } catch (error) {
-    console.error('Vision scan error:', error);
-    return res.status(200).json({ status: 'failed', error: error.message });
+    console.error('ARIA vision scan error:', error);
+    return res.status(200).json({ status: 'failed', error: error.message || 'ARIA encountered an issue' });
   }
-      }
+}
