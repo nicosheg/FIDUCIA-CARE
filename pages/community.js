@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Layout from '../components/Layout';
 
@@ -13,26 +13,13 @@ export default function CommunityPage() {
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [form, setForm] = useState({ full_name: '', phone: '', type: 'visitor' });
-  const [editingId, setEditingId] = useState(null);
-  const [editValues, setEditValues] = useState({ full_name: '', phone: '', type: '' });
-  const [showDeleted, setShowDeleted] = useState(false);
+  const [selectedPerson, setSelectedPerson] = useState(null);
 
-  // Selection state
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [selectMode, setSelectMode] = useState(false);
-  const longPressTimer = useRef(null);
-
-  useEffect(() => {
-    fetchPeople();
-  }, [showDeleted]);
-
+  useEffect(() => { fetchPeople(); }, []);
   const fetchPeople = async () => {
-    const res = await fetch(`/api/people?organization_id=${ORG_ID}&include_deleted=${showDeleted}&_=${Date.now()}`);
+    const res = await fetch(`/api/people?organization_id=${ORG_ID}&_=${Date.now()}`);
     const data = await res.json();
-    if (Array.isArray(data)) {
-      setPeople(data);
-      setLoading(false);
-    }
+    if (Array.isArray(data)) { setPeople(data); setLoading(false); }
   };
 
   useEffect(() => {
@@ -40,346 +27,115 @@ export default function CommunityPage() {
     if (roleFilter !== 'all') result = result.filter(p => p.type === roleFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
-      result = result.filter(p =>
-        (p.first_name || '').toLowerCase().includes(q) ||
-        (p.phone || '').includes(q)
-      );
+      result = result.filter(p => (p.first_name || '').toLowerCase().includes(q) || (p.phone || '').includes(q));
     }
     setFiltered(result);
   }, [people, search, roleFilter]);
 
   const addPerson = async e => {
     e.preventDefault();
-    if (!form.full_name.trim()) return;
-    const res = await fetch('/api/people', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        first_name: form.full_name.trim(),
-        last_name: '',
-        phone: form.phone,
-        organization_id: ORG_ID,
-        type: form.type,
-      }),
-    });
+    const res = await fetch('/api/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ first_name: form.full_name, last_name: '', phone: form.phone, organization_id: ORG_ID, type: form.type }) });
     const data = await res.json();
-    if (data.id) {
-      setPeople(prev => [data, ...prev]);
-      setForm({ full_name: '', phone: '', type: 'visitor' });
-      setShowAddForm(false);
-      setMessage(`✅ ${data.first_name} added`);
-      setTimeout(() => setMessage(''), 3000);
-    } else setMessage('Error: ' + (data.error || 'Could not add'));
+    if (data.id) { setPeople(prev => [data, ...prev]); setForm({ full_name: '', phone: '', type: 'visitor' }); setShowAddForm(false); }
   };
 
-  const startEdit = person => {
-    setEditingId(person.id);
-    setEditValues({
-      full_name: person.first_name || '',
-      phone: person.phone || '',
-      type: person.type || 'visitor',
-    });
-  };
-
-  const saveEdit = async id => {
-    const res = await fetch('/api/people', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id,
-        first_name: editValues.full_name.trim(),
-        last_name: '',
-        phone: editValues.phone,
-        type: editValues.type,
-        organization_id: ORG_ID,
-      }),
-    });
+  const generateDraft = async (personId) => {
+    const res = await fetch('/api/presence/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: personId }) });
     const data = await res.json();
-    if (data.id) {
-      setPeople(prev =>
-        prev.map(p =>
-          p.id === id
-            ? { ...p, first_name: editValues.full_name, phone: editValues.phone, type: editValues.type }
-            : p
-        )
-      );
-      setEditingId(null);
-      setMessage('✅ Updated');
-      setTimeout(() => setMessage(''), 3000);
-    } else setMessage('Error: ' + (data.error || 'Update failed'));
-  };
-
-  const cancelEdit = () => setEditingId(null);
-
-  const handleDeleteSingle = async (personId, e) => {
-    if (e) e.stopPropagation();
-    if (!confirm('Move to trash?')) return;
-
-    const backup = people.find(p => p.id === personId);
-    setPeople(prev => prev.filter(p => p.id !== personId));
-
-    try {
-      const res = await fetch('/api/people/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: personId }),
-      });
-      const data = await res.json();
-      if (!data.success) {
-        setPeople(prev => [...prev, backup]);
-        alert('Delete failed: ' + (data.error || 'Unknown'));
-      }
-    } catch (err) {
-      setPeople(prev => [...prev, backup]);
-      alert('Network error – person not deleted.');
-    }
-  };
-
-  const bulkDelete = async () => {
-    if (selectedIds.size === 0) return;
-    if (!confirm(`Move ${selectedIds.size} selected people to trash?`)) return;
-
-    const backup = people.filter(p => selectedIds.has(p.id));
-    setPeople(prev => prev.filter(p => !selectedIds.has(p.id)));
-    setSelectedIds(new Set());
-    setSelectMode(false);
-
-    for (const id of selectedIds) {
-      try {
-        await fetch('/api/people/delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id }),
-        });
-      } catch (err) {
-        setPeople(prev => [...backup, ...prev]);
-        alert('One or more deletes failed. Rolled back.');
-        break;
-      }
-    }
-    setMessage(`🗑️ Trashed ${selectedIds.size} people`);
+    if (data.message) {
+      if (navigator.clipboard) { await navigator.clipboard.writeText(data.message); setMessage('✅ Draft copied – ready to paste'); }
+    } else setMessage('Error: ' + data.error);
     setTimeout(() => setMessage(''), 3000);
   };
 
-  const handleRestore = async personId => {
-    const res = await fetch('/api/people/restore', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: personId }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      fetchPeople();
-      setMessage('🔄 Restored');
-      setTimeout(() => setMessage(''), 3000);
-    }
-  };
-
-  // Long press logic
-  const onPointerDown = useCallback((personId) => {
-    longPressTimer.current = setTimeout(() => {
-      setSelectMode(true);
-      setSelectedIds(prev => new Set(prev).add(personId));
-      if (navigator.vibrate) navigator.vibrate(50);
-    }, 2000);
-  }, []);
-
-  const onPointerUp = useCallback(() => {
-    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-  }, []);
-
-  const onPointerLeave = useCallback(() => {
-    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-  }, []);
-
-  const toggleSelection = (personId) => {
-    if (!selectMode) return;
-    setSelectedIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(personId)) newSet.delete(personId); else newSet.add(personId);
-      return newSet;
-    });
-  };
-
-  const cancelSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
-  const selectAll = () => setSelectedIds(new Set(filtered.map(p => p.id)));
-
-  if (loading) return <Layout><div style={{padding:20}}><p>…</p></div></Layout>;
+  if (loading) return <Layout><div style={{ padding:20 }}>…</div></Layout>;
 
   return (
     <Layout>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
-        <h1 style={pageTitle}>{people.length} lives remembered</h1>
+        <h1 style={{ fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 25 }}>
+          {people.length} lives remembered
+        </h1>
 
-        {selectMode && (
-          <div style={selectBar}>
-            <span style={{ color: '#f0f0f0', fontWeight: 600 }}>{selectedIds.size} selected</span>
-            <button onClick={selectAll} style={glassBtn}>Select All</button>
-            <button onClick={(e) => { e.stopPropagation(); bulkDelete(); }} style={{ ...glassBtn, borderColor: '#EF4444' }}>
-              Remove
-            </button>
-            <button onClick={cancelSelectMode} style={glassBtn}>Cancel</button>
-          </div>
-        )}
-
-        <div style={controlsRow}>
-          <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)} style={searchStyle} />
-          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={selectStyle}>
-            <option value="all">All</option>
-            <option value="visitor">Visitor</option>
-            <option value="member">Member</option>
-          </select>
-          <button onClick={() => setShowDeleted(!showDeleted)} style={glassBtn}>
-            {showDeleted ? 'Active' : 'Trash'}
-          </button>
-          <button onClick={() => setShowAddForm(!showAddForm)} style={glassBtn}>
-            + Add Person
-          </button>
-        </div>
-
-        {showAddForm && (
-          <form onSubmit={addPerson} style={formCard}>
-            <input
-              placeholder="Full name (e.g., Bro Jerry, Sis Peace)"
-              value={form.full_name}
-              onChange={e => setForm({ ...form, full_name: e.target.value })}
-              required
-              style={miniInput}
-            />
-            <input
-              placeholder="Phone (080...)"
-              value={form.phone}
-              onChange={e => setForm({ ...form, phone: e.target.value })}
-              required
-              style={miniInput}
-            />
-            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={miniInput}>
-              <option value="visitor">Visitor</option>
-              <option value="member">Member</option>
-            </select>
-            <button type="submit" style={glassBtn}>Save</button>
-          </form>
-        )}
-
-        {message && <div style={msgStyle}>{message}</div>}
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
-          {filtered.map(person => (
-            <div
-              key={person.id}
-              onPointerDown={() => onPointerDown(person.id)}
-              onPointerUp={onPointerUp}
-              onPointerLeave={onPointerLeave}
-              onClick={() => toggleSelection(person.id)}
-              style={{
-                background: selectedIds.has(person.id) ? 'rgba(212,175,55,0.08)' : 'rgba(255,255,255,0.02)',
-                backdropFilter: 'blur(20px)',
-                borderRadius: 20,
-                padding: 20,
-                border: selectedIds.has(person.id) ? '1px solid #D4AF37' : '1px solid rgba(255,255,255,0.04)',
-                cursor: 'pointer',
-                userSelect: 'none',
-                transition: 'all 0.3s',
-              }}
-            >
-              {editingId === person.id ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <input
-                    value={editValues.full_name}
-                    onChange={e => setEditValues({ ...editValues, full_name: e.target.value })}
-                    style={editInput}
-                    placeholder="Full name"
-                  />
-                  <input
-                    value={editValues.phone}
-                    onChange={e => setEditValues({ ...editValues, phone: e.target.value })}
-                    style={editInput}
-                    placeholder="Phone"
-                  />
-                  <select value={editValues.type} onChange={e => setEditValues({ ...editValues, type: e.target.value })} style={editInput}>
-                    <option value="visitor">Visitor</option>
-                    <option value="member">Member</option>
-                  </select>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => saveEdit(person.id)} style={glassBtn}>💾 Save</button>
-                    <button onClick={cancelEdit} style={glassBtn}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
-                    {person.type && (
-                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37' }}>
-                        {person.type}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 14 }}>
-                    {person.phone
-                      ? person.phone
-                      : 'No phone'}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={() => startEdit(person)} style={actionLink}>✏️ Edit</button>
-                    <Link href={`/person/${person.id}`} style={actionLink}>📋 Journey</Link>
-                    <button onClick={(e) => handleDeleteSingle(person.id, e)} style={actionBtn}>
-                      Remove
-                    </button>
-                  </div>
-                </>
-              )}
+        {people.length === 0 && (
+          <div style={emptyState}>
+            <div style={{ fontSize: 48, marginBottom: 20 }}>📋</div>
+            <p style={{ fontSize: 18, color: '#D4AF37', marginBottom: 10 }}>Welcome. ARIA is ready to help you care for every life.</p>
+            <p style={{ color: 'rgba(255,255,255,0.5)', marginBottom: 20 }}>Upload your first register or add a person manually.</p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <a href="/scan" style={glassBtn}>📷 Scan Register</a>
+              <button onClick={() => setShowAddForm(true)} style={glassBtn}>+ Add First Person</button>
             </div>
-          ))}
-        </div>
-        {filtered.length === 0 && (
-          <div style={{ textAlign: 'center', padding: 40, color: 'rgba(255,255,255,0.4)' }}>
-            No people found.
           </div>
+        )}
+
+        {people.length > 0 && (
+          <>
+            <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)} style={searchStyle} />
+              <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={selectStyle}>
+                <option value="all">All</option>
+                <option value="visitor">Visitor</option>
+                <option value="member">Member</option>
+              </select>
+              <button onClick={() => setShowAddForm(!showAddForm)} style={glassBtn}>+ Add Person</button>
+            </div>
+
+            {showAddForm && (
+              <form onSubmit={addPerson} style={formCard}>
+                <input placeholder="Full name" value={form.full_name} onChange={e => setForm({...form, full_name: e.target.value})} required style={miniInput} />
+                <input placeholder="Phone" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} required style={miniInput} />
+                <select value={form.type} onChange={e => setForm({...form, type: e.target.value})} style={miniInput}>
+                  <option value="visitor">Visitor</option>
+                  <option value="member">Member</option>
+                </select>
+                <button type="submit" style={glassBtn}>Save</button>
+              </form>
+            )}
+
+            {message && <div style={msgStyle}>{message}</div>}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+              {filtered.map(person => (
+                <div key={person.id} onClick={() => setSelectedPerson(selectedPerson?.id === person.id ? null : person)} style={cardStyle}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
+                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37' }}>{person.type || 'visitor'}</span>
+                  </div>
+                  <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 4 }}>{person.phone || 'No phone'}</div>
+                  <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>{person.last_attended_date ? `Last seen ${person.last_attended_date}` : 'New'}</div>
+
+                  {selectedPerson?.id === person.id && (
+                    <div style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                        <button onClick={() => generateDraft(person.id)} style={draftBtn}>✨ Draft Message</button>
+                        <Link href={`/person/${person.id}`} style={journeyBtn}>Journey →</Link>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button style={secondaryBtn}>Edit</button>
+                        <button style={secondaryBtn}>Remove</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            {filtered.length === 0 && <div style={{ textAlign: 'center', padding: 40, color: 'rgba(255,255,255,0.4)' }}>No matches.</div>}
+          </>
         )}
       </div>
     </Layout>
   );
 }
 
-// Styles
-const pageTitle = { fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 25 };
-const selectBar = {
-  position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
-  background: 'rgba(10,15,26,0.9)', backdropFilter: 'blur(20px)',
-  borderRadius: 20, padding: '12px 24px', display: 'flex', gap: 16, zIndex: 1001,
-  border: '1px solid rgba(255,255,255,0.06)',
-};
-const glassBtn = {
-  background: 'rgba(255,255,255,0.03)',
-  border: '1px solid rgba(255,255,255,0.08)',
-  color: '#fff', borderRadius: 10, padding: '8px 16px', fontSize: 13, cursor: 'pointer',
-  backdropFilter: 'blur(10px)',
-};
-const controlsRow = { display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' };
-const searchStyle = {
-  flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)',
-  color: '#fff', outline: 'none', backdropFilter: 'blur(10px)',
-};
+const emptyState = { textAlign: 'center', padding: '60px 20px' };
+const glassBtn = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 10, padding: '8px 16px', fontSize: 13, cursor: 'pointer', backdropFilter: 'blur(10px)', textDecoration: 'none', display: 'inline-block' };
+const searchStyle = { flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#fff', outline: 'none', backdropFilter: 'blur(10px)' };
 const selectStyle = { ...searchStyle, flex: 'none', width: 120 };
-const formCard = {
-  background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(20px)',
-  borderRadius: 20, padding: 20, marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 10,
-  border: '1px solid rgba(255,255,255,0.04)',
-};
-const miniInput = {
-  padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)',
-  background: 'rgba(255,255,255,0.03)', color: '#fff', outline: 'none',
-};
+const formCard = { background: 'rgba(255,255,255,0.02)', backdropFilter: 'blur(20px)', borderRadius: 20, padding: 20, marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 10, border: '1px solid rgba(255,255,255,0.04)' };
+const miniInput = { padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#fff', outline: 'none' };
 const msgStyle = { background: 'rgba(52,211,153,0.1)', padding: 10, borderRadius: 12, marginBottom: 15, color: '#34D399' };
-const editInput = { ...miniInput, width: '100%' };
-const actionLink = {
-  textDecoration: 'none', fontSize: 13, color: '#D4AF37', padding: '4px 10px',
-  borderRadius: 8, border: '1px solid rgba(212,175,55,0.2)', background: 'rgba(212,175,55,0.05)',
-  cursor: 'pointer', display: 'inline-block',
-};
-const actionBtn = {
-  background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)',
-  borderRadius: 8, padding: '4px 10px', fontSize: 13, cursor: 'pointer',
-};
+const cardStyle = { background: 'rgba(255,255,255,0.03)', backdropFilter: 'blur(20px)', borderRadius: 20, padding: 20, border: '1px solid rgba(255,255,255,0.06)', cursor: 'pointer', transition: 'all 0.2s' };
+const draftBtn = { background: 'rgba(212,175,55,0.15)', border: '1px solid rgba(212,175,55,0.3)', color: '#D4AF37', borderRadius: 8, padding: '6px 12px', fontSize: 13, cursor: 'pointer' };
+const journeyBtn = { textDecoration: 'none', fontSize: 13, color: '#60A5FA', padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(96,165,250,0.2)', background: 'rgba(96,165,250,0.05)', display: 'inline-block' };
+const secondaryBtn = { background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)', borderRadius: 8, padding: '4px 10px', fontSize: 13, cursor: 'pointer' };
