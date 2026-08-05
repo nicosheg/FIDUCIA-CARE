@@ -29,41 +29,85 @@ export default function Dashboard() {
       });
   }, []);
 
-  if (!stats) return <div style={{ color: '#fff', padding: 20 }}>…</div>;
-
   return (
     <Layout>
       <div style={{ maxWidth: 700, margin: '0 auto', padding: '40px 20px' }}>
-        {/* ARIA Message – highest importance */}
-        <div className="fiducia-card" style={{ marginBottom: 30, padding: '24px 28px' }}>
-          <p className="aria-speaks" style={{ fontSize: 22, margin: 0 }}>{moment}</p>
-        </div>
+        {!stats ? (
+          // ---------- Skeleton loading – same shape, no flash ----------
+          <>
+            {/* Moment placeholder */}
+            <div className="fiducia-card shimmer" style={{ marginBottom: 30, padding: '24px 28px' }}>
+              <div style={{ height: 28, width: '80%', borderRadius: 8 }} />
+              <div style={{ height: 28, width: '50%', borderRadius: 8, marginTop: 10 }} />
+            </div>
 
-        {/* Observation – secondary */}
-        {ariaObservation && (
-          <div className="fiducia-card" style={{ padding: '14px 20px', marginBottom: 25 }}>
-            <p className="aria-speaks" style={{ margin: 0 }}>{ariaObservation}</p>
-          </div>
+            {/* Stat cards */}
+            <div style={{ display: 'flex', gap: 20, marginBottom: 30, flexWrap: 'wrap' }}>
+              <div className="fiducia-card shimmer" style={{ flex: 1, minWidth: 150, padding: '24px 20px', textAlign: 'center' }}>
+                <div style={{ height: 18, width: '60%', borderRadius: 6, margin: '0 auto 12px' }} />
+                <div style={{ height: 42, width: '40%', borderRadius: 10, margin: '0 auto' }} />
+              </div>
+              <div className="fiducia-card shimmer" style={{ flex: 1, minWidth: 150, padding: '24px 20px', textAlign: 'center' }}>
+                <div style={{ height: 18, width: '60%', borderRadius: 6, margin: '0 auto 12px' }} />
+                <div style={{ height: 42, width: '40%', borderRadius: 10, margin: '0 auto' }} />
+              </div>
+            </div>
+
+            {/* Button placeholders */}
+            <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+              <div className="shimmer" style={{ width: 140, height: 46, borderRadius: 30 }} />
+              <div className="shimmer" style={{ width: 120, height: 46, borderRadius: 30 }} />
+            </div>
+          </>
+        ) : (
+          // ---------- Real content – identical structure ----------
+          <>
+            <div className="fiducia-card" style={{ marginBottom: 30, padding: '24px 28px' }}>
+              <p className="aria-speaks" style={{ fontSize: 22, margin: 0 }}>{moment}</p>
+            </div>
+
+            {ariaObservation && (
+              <div className="fiducia-card" style={{ padding: '14px 20px', marginBottom: 25 }}>
+                <p className="aria-speaks" style={{ margin: 0 }}>{ariaObservation}</p>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 20, marginBottom: 30, flexWrap: 'wrap' }}>
+              <div className="fiducia-card" style={{ flex: 1, minWidth: 150, textAlign: 'center' }}>
+                <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>Today's Community</div>
+                <div style={{ fontSize: 42, fontWeight: 700, color: '#D4AF37' }}>{stats.present_count}</div>
+              </div>
+              <div className="fiducia-card" style={{ flex: 1, minWidth: 150, textAlign: 'center' }}>
+                <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>Need Attention</div>
+                <div style={{ fontSize: 42, fontWeight: 700, color: '#EF4444' }}>{stats.absent_count}</div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+              <a href="/scan" className="fiducia-button fiducia-button-primary">Scan Register</a>
+              <a href="/community" className="fiducia-button fiducia-button-secondary">Community</a>
+            </div>
+          </>
         )}
-
-        {/* Statistics – lower importance */}
-        <div style={{ display: 'flex', gap: 20, marginBottom: 30, flexWrap: 'wrap' }}>
-          <div className="fiducia-card" style={{ flex: 1, minWidth: 150, textAlign: 'center' }}>
-            <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>Today's Community</div>
-            <div style={{ fontSize: 42, fontWeight: 700, color: '#D4AF37' }}>{stats.present_count}</div>
-          </div>
-          <div className="fiducia-card" style={{ flex: 1, minWidth: 150, textAlign: 'center' }}>
-            <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>Need Attention</div>
-            <div style={{ fontSize: 42, fontWeight: 700, color: '#EF4444' }}>{stats.absent_count}</div>
-          </div>
-        </div>
-
-        {/* Primary Action – clear visual weight */}
-        <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-          <a href="/scan" className="fiducia-button fiducia-button-primary">Scan Register</a>
-          <a href="/community" className="fiducia-button fiducia-button-secondary">Community</a>
-        </div>
       </div>
+
+      {/* Shimmer animation keyframes */}
+      <style jsx>{`
+        .shimmer {
+          background: linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0.03) 25%,
+            rgba(255, 255, 255, 0.06) 50%,
+            rgba(255, 255, 255, 0.03) 75%
+          );
+          background-size: 200% 100%;
+          animation: shimmer 1.5s ease-in-out infinite;
+        }
+        @keyframes shimmer {
+          0% { background-position: -200% 0; }
+          100% { background-position: 200% 0; }
+        }
+      `}</style>
     </Layout>
   );
-      }
+          }
