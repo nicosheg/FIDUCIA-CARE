@@ -8,31 +8,33 @@ export default function ScanPage() {
   const fileInputRef = useRef(null);
   const [programName, setProgramName] = useState('GIBEON');
   const [scanState, setScanStateLocal] = useState(getScanState());
+  const [progressMessage, setProgressMessage] = useState('');
+  const [completionTimestamp, setCompletionTimestamp] = useState(null);
+  const [celebration, setCelebration] = useState(false);
   const pollRef = useRef(null);
 
-  // Keep local state in sync with global store
   const syncState = useCallback(() => {
     setScanStateLocal(getScanState());
   }, []);
 
-  // On mount, restore any existing scan state and start polling if needed
+  // On mount, restore state and resume polling if needed
   useEffect(() => {
+    const current = getScanState();
     syncState();
-    if (scanState.stage === 'processing' && scanState.jobId) {
-      startPolling(scanState.jobId);
+    if (current.stage === 'processing' && current.jobId) {
+      startPolling(current.jobId);
     }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, []);
 
-  // Helper to update both local and global state
   const updateState = (newState) => {
     setScanState(newState);
     syncState();
   };
 
-  // Image preprocessing (same as before)
+  // Image preprocessing (unchanged)
   const preprocessImage = (file) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -87,7 +89,18 @@ export default function ScanPage() {
     });
   };
 
-  // Start polling for job status
+  // Progress message mapping
+  const progressLabels = {
+    queued: 'Preparing to read…',
+    enhancing: 'Enhancing image…',
+    reading_handwriting: 'Reading handwriting…',
+    matching_community: 'Matching existing community…',
+    building_memory: 'Building memory…',
+    complete: 'Complete',
+    failed: 'Failed',
+  };
+
+  // Polling
   const startPolling = (jobId) => {
     if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
@@ -96,28 +109,22 @@ export default function ScanPage() {
         const data = await res.json();
         if (data.status === 'complete') {
           clearInterval(pollRef.current);
-          updateState({
-            stage: 'revealing',
-            results: data.result,
-            scanningLine: false,
-          });
-          // Begin the reveal sequence
+          setCompletionTimestamp(new Date().toLocaleTimeString());
+          updateState({ stage: 'revealing', results: data.result, scanningLine: false });
           revealResults(data.result);
         } else if (data.status === 'failed') {
           clearInterval(pollRef.current);
-          updateState({
-            stage: 'error',
-            scanningLine: false,
-            message: data.result?.error || 'Scan failed',
-          });
+          updateState({ stage: 'error', message: data.result?.error || 'Scan failed' });
+        } else {
+          setProgressMessage(progressLabels[data.progress] || data.progress);
         }
       } catch (err) {
         console.error('Polling error:', err);
       }
-    }, 2000);
+    }, 1500);
   };
 
-  // Reveal results sequentially
+  // Reveal (backend categories only, no frontend inference)
   const revealResults = async (resultData) => {
     const people = resultData.people || [];
     updateState({ stage: 'revealing', revealedPeople: [], ariaMessages: [] });
@@ -128,159 +135,127 @@ export default function ScanPage() {
       updateState({ revealedPeople: revealed });
     }
 
-    const msgs = [`I found ${people.length} people.`];
+    // Compute stats from backend data
+    const newVisitors = people.filter(p => p.relationship_stage === 'new_visitor').length;
+    const returning = people.filter(p => p.relationship_stage === 'returning' || p.relationship_stage === 'familiar_face').length;
+    const regulars = people.filter(p => p.relationship_stage === 'regular').length;
+    const needsReview = resultData.needs_review || 0;
+    const duplicates = resultData.duplicates?.length || 0;
+
+    const msgs = [`I recognised ${people.length} people from this register.`];
     updateState({ ariaMessages: msgs });
     await new Promise(r => setTimeout(r, 800));
-    const dups = resultData.duplicates?.length || 0;
-    const needsReview = resultData.needs_review || 0;
-    if (dups > 0) {
-      msgs.push(`${dups} may already be in your community.`);
+    if (duplicates > 0) {
+      msgs.push(`${duplicates} familiar faces recognised.`);
       updateState({ ariaMessages: [...msgs] });
       await new Promise(r => setTimeout(r, 700));
     }
     if (needsReview > 0) {
-      msgs.push(`${needsReview} records need your review.`);
+      msgs.push(`${needsReview} need your attention.`);
       updateState({ ariaMessages: [...msgs] });
       await new Promise(r => setTimeout(r, 700));
     }
-    msgs.push(`Everything else looks good.`);
+    msgs.push(`ARIA has finished preparing your community.`);
     updateState({ ariaMessages: [...msgs] });
     await new Promise(r => setTimeout(r, 800));
 
-    const ready = people.length - dups - needsReview;
     updateState({
       stage: 'complete',
-      summary: {
-        total: people.length,
-        ready,
-        duplicates: dups,
-        needsReview,
-        confidence: 97,
-      },
+      summary: { total: people.length, newVisitors, returning, regulars, duplicates, needsReview },
     });
+
+    // Subtle celebration pulse
+    setCelebration(true);
+    setTimeout(() => setCelebration(false), 2000);
   };
 
-  // Handle file selection
   const handleFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     e.target.value = null;
 
-    // Start preprocessing
-    updateState({ stage: 'processing', scanningLine: true, message: 'Enhancing image...' });
+    updateState({ stage: 'processing', scanningLine: true });
+    setProgressMessage('Preparing image…');
     const base64 = await preprocessImage(file);
 
-    // Start background job
     try {
       const res = await fetch('/api/scan/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_base64: base64,
-          church_id: 'demo-org',
-          program_name: programName.trim() || 'GIBEON',
-        }),
+        body: JSON.stringify({ image_base64: base64, church_id: 'demo-org', program_name: programName.trim() || 'GIBEON' }),
       });
       const data = await res.json();
       if (data.job_id) {
-        updateState({
-          stage: 'processing',
-          jobId: data.job_id,
-          scanningLine: true,
-          message: 'ARIA is reading the register…',
-        });
+        updateState({ stage: 'processing', jobId: data.job_id, scanningLine: true });
         startPolling(data.job_id);
       } else {
-        updateState({ stage: 'error', scanningLine: false, message: 'Failed to start scan' });
+        updateState({ stage: 'error', message: 'Failed to start scan' });
       }
     } catch (err) {
-      updateState({ stage: 'error', scanningLine: false, message: err.message });
+      updateState({ stage: 'error', message: err.message });
     }
   };
 
-  const { stage, scanningLine, revealedPeople, ariaMessages, summary, message, results } = scanState;
-
-  const today = new Date().toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-  });
+  const { stage, scanningLine, revealedPeople, ariaMessages, summary, message } = scanState;
 
   return (
     <Layout>
       <div style={{ maxWidth: 600, margin: '40px auto', padding: '0 20px', textAlign: 'center' }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#f0f0f0', marginBottom: 8 }}>
-          Scan Attendance
-        </h1>
-        <p style={{ color: 'rgba(255,255,255,0.6)', marginBottom: 25 }}>{today}</p>
+        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#f0f0f0', marginBottom: 8 }}>Scan Attendance</h1>
+        <p style={{ color: 'rgba(255,255,255,0.6)', marginBottom: 25 }}>
+          {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+        </p>
 
         {stage === 'idle' && (
           <>
             <div style={{ marginBottom: 25 }}>
-              <label style={{ fontWeight: 600, display: 'block', marginBottom: 8, color: '#f0f0f0' }}>
-                Program / Event Name
-              </label>
-              <input
-                type="text"
-                value={programName}
-                onChange={e => setProgramName(e.target.value)}
-                placeholder="e.g., GIBEON"
-                style={{
-                  padding: '12px 16px', fontSize: 16, borderRadius: 12,
-                  border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)',
-                  color: '#fff', width: '100%', maxWidth: 300, textAlign: 'center', outline: 'none',
-                }}
-              />
+              <label style={{ fontWeight: 600, display: 'block', marginBottom: 8, color: '#f0f0f0' }}>Program / Event Name</label>
+              <input type="text" value={programName} onChange={e => setProgramName(e.target.value)} placeholder="e.g., GIBEON"
+                style={{ padding: '12px 16px', fontSize: 16, borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', width: '100%', maxWidth: 300, textAlign: 'center', outline: 'none' }} />
             </div>
-
             <div className="fiducia-card" style={{ padding: '10px 16px', marginBottom: 25, textAlign: 'left', fontSize: 14, color: 'rgba(255,255,255,0.6)' }}>
               Ensure the full page is visible — no torn, folded, or cut‑off edges — and good lighting.
             </div>
-
             <label htmlFor="cameraInput" style={{ cursor: 'pointer', display: 'inline-block' }}>
-              <div className="fiducia-button fiducia-button-primary" style={{ fontSize: 18, padding: '16px 36px' }}>
-                Take Photo of Register
-              </div>
+              <div className="fiducia-button fiducia-button-primary" style={{ fontSize: 18, padding: '16px 36px' }}>Take Photo of Register</div>
             </label>
             <input ref={fileInputRef} id="cameraInput" type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: 'none' }} />
           </>
         )}
 
         {stage === 'processing' && (
-          <div className="fiducia-card" style={{ padding: 24, marginTop: 20, textAlign: 'left' }}>
-            <div style={{ height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.03)', marginBottom: 15, overflow: 'hidden' }}>
-              <div style={{ width: '30%', height: '100%', background: '#D4AF37', animation: 'scanMove 1.5s ease-in-out infinite', borderRadius: 2 }} />
+          <div className="fiducia-card" style={{ padding: 24, marginTop: 20, textAlign: 'center' }}>
+            <div style={{
+              width: 80, height: 80, borderRadius: '50%', margin: '0 auto 20px',
+              background: 'radial-gradient(circle, rgba(212,175,55,0.15) 0%, transparent 70%)',
+              animation: 'breathe 3s ease-in-out infinite',
+            }}>
+              <div style={{ width: 16, height: 16, borderRadius: '50%', background: '#D4AF37', position: 'relative', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', boxShadow: '0 0 20px rgba(212,175,55,0.4)', animation: 'pulse 2s ease-in-out infinite' }} />
             </div>
-            <p style={{ fontSize: 18, fontWeight: 600, marginBottom: 8, color: '#f0f0f0' }}>
-              {message || 'ARIA is reading the register…'}
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#D4AF37', opacity: 0.6, animation: 'pulse 2s ease-in-out infinite' }} />
-              <span className="aria-speaks" style={{ fontSize: 14 }}>You can leave this page – ARIA will keep working.</span>
-            </div>
+            <p className="aria-speaks" style={{ fontSize: 16, marginBottom: 8 }}>{progressMessage || 'ARIA is reading the register…'}</p>
+            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>You can leave this page — ARIA will keep working.</p>
           </div>
         )}
 
         {stage === 'revealing' && (
           <div className="fiducia-card" style={{ padding: 24, marginTop: 20, textAlign: 'left' }}>
-            <p style={{ fontSize: 16, color: '#D4AF37', marginBottom: 15, fontWeight: 500 }}>
-              Understanding relationships…
-            </p>
+            <p style={{ fontSize: 16, color: '#D4AF37', marginBottom: 15, fontWeight: 500 }}>Building community memory…</p>
             {revealedPeople.map((p, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <div key={i} style={{ display: 'flex', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                 <span style={{ flex: 2 }}>{p.name}</span>
-                <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.08)', margin: '0 10px', overflow: 'hidden' }}>
-                  <div style={{
-                    width: `${p.confidence}%`, height: '100%', borderRadius: 2,
-                    background: p.confidence >= 90 ? '#34D399' : p.confidence >= 80 ? '#D4AF37' : '#EF4444',
-                    boxShadow: `0 0 6px ${p.confidence >= 90 ? 'rgba(52,211,153,0.4)' : p.confidence >= 80 ? 'rgba(212,175,55,0.4)' : 'rgba(239,68,68,0.4)'}`,
-                    transition: 'width 0.3s',
-                  }} />
-                </div>
-                <span style={{ flex: 0.5, textAlign: 'right', fontWeight: 600, fontSize: 13, color: p.confidence >= 90 ? '#34D399' : p.confidence >= 80 ? '#D4AF37' : '#EF4444' }}>
-                  {p.confidence}%
+                <span style={{
+                  fontSize: 11, padding: '2px 8px', borderRadius: 12,
+                  background: p.relationship_stage === 'new_visitor' ? 'rgba(52,211,153,0.15)' :
+                              p.relationship_stage === 'familiar_face' || p.relationship_stage === 'returning' ? 'rgba(212,175,55,0.15)' :
+                              'rgba(96,165,250,0.15)',
+                  color: p.relationship_stage === 'new_visitor' ? '#34D399' :
+                         p.relationship_stage === 'familiar_face' || p.relationship_stage === 'returning' ? '#D4AF37' : '#60A5FA',
+                }}>
+                  {p.relationship_stage === 'new_visitor' ? 'New visitor' :
+                   p.relationship_stage === 'familiar_face' ? 'Familiar face' :
+                   p.relationship_stage === 'returning' ? 'Returning' : 'Regular'}
                 </span>
-                <span style={{ flex: 1, textAlign: 'right', color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>
-                  {p.phone || '—'}
-                </span>
+                <span style={{ flex: 1, textAlign: 'right', color: 'rgba(255,255,255,0.5)', fontSize: 14 }}>{p.phone || '—'}</span>
               </div>
             ))}
             {ariaMessages.map((msg, i) => (
@@ -290,52 +265,54 @@ export default function ScanPage() {
         )}
 
         {stage === 'complete' && summary && (
-          <div className="fiducia-card" style={{ padding: 24, marginTop: 20, textAlign: 'left' }}>
-            <div style={{ fontSize: 24, color: '#D4AF37', marginBottom: 8 }}>Scan Complete</div>
-            <p style={{ color: '#f0f0f0', fontSize: 18, marginBottom: 16 }}>{summary.total} people remembered.</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#34D399', fontSize: 15 }}>
-                <span>{summary.ready} ready</span>
-              </div>
-              {summary.duplicates > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#F59E0B', fontSize: 15 }}>
-                  <span>{summary.duplicates} possible duplicates</span>
-                </div>
-              )}
-              {summary.needsReview > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontSize: 15 }}>
-                  <span>{summary.needsReview} needs review</span>
-                </div>
+          <div className="fiducia-card" style={{
+            padding: 24, marginTop: 20, textAlign: 'left',
+            animation: celebration ? 'celebratePulse 0.6s ease-out' : 'none',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 24, color: '#D4AF37' }}>Memory updated</div>
+              {completionTimestamp && (
+                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>{completionTimestamp}</span>
               )}
             </div>
-            <p className="aria-speaks" style={{ marginBottom: 20, fontSize: 14 }}>Community updated. ARIA is ready.</p>
-            <button onClick={() => router.push('/community')} className="fiducia-button fiducia-button-primary" style={{ width: '100%' }}>
-              View Community
-            </button>
+            <p style={{ color: '#f0f0f0', fontSize: 18, marginBottom: 16 }}>{summary.total} lives remembered.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
+              {summary.newVisitors > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#34D399', fontSize: 15 }}><span>{summary.newVisitors} first-time visitors</span></div>}
+              {summary.returning > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#D4AF37', fontSize: 15 }}><span>{summary.returning} familiar faces returning</span></div>}
+              {summary.regulars > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#60A5FA', fontSize: 15 }}><span>{summary.regulars} regular members</span></div>}
+              {summary.duplicates > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#F59E0B', fontSize: 15 }}><span>{summary.duplicates} familiar faces recognised</span></div>}
+              {summary.needsReview > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontSize: 15 }}><span>{summary.needsReview} needs your attention</span></div>}
+            </div>
+            <p className="aria-speaks" style={{ marginBottom: 20, fontSize: 14 }}>ARIA has finished preparing your community.</p>
+            <button onClick={() => router.push('/community')} className="fiducia-button fiducia-button-primary" style={{ width: '100%' }}>View Community</button>
           </div>
         )}
 
         {stage === 'error' && (
           <div className="fiducia-card" style={{ padding: 24, marginTop: 20, textAlign: 'left' }}>
-            <p style={{ color: '#EF4444', marginBottom: 12 }}>{message || 'ARIA couldn't read the register. Please try again.'}</p>
-            <button onClick={() => updateState({ stage: 'idle' })} className="fiducia-button fiducia-button-secondary" style={{ padding: '10px 20px' }}>
-              Try Again
-            </button>
+            <p style={{ color: '#EF4444', marginBottom: 12 }}>{message || 'ARIA was unable to read the register. Please try again with a clearer photo.'}</p>
+            <button onClick={() => updateState({ stage: 'idle' })} className="fiducia-button fiducia-button-secondary" style={{ padding: '10px 20px' }}>Try Again</button>
           </div>
         )}
       </div>
 
       <style jsx>{`
-        @keyframes scanMove {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(400%); }
+        @keyframes breathe {
+          0% { transform: scale(0.95); opacity: 0.8; }
+          50% { transform: scale(1.05); opacity: 1; }
+          100% { transform: scale(0.95); opacity: 0.8; }
         }
         @keyframes pulse {
-          0% { opacity: 0.4; transform: scale(1); }
-          50% { opacity: 0.8; transform: scale(1.3); }
-          100% { opacity: 0.4; transform: scale(1); }
+          0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
+          50% { transform: translate(-50%, -50%) scale(1.4); opacity: 1; }
+          100% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; }
+        }
+        @keyframes celebratePulse {
+          0% { box-shadow: 0 0 0 0 rgba(212,175,55,0.4); }
+          50% { box-shadow: 0 0 30px 10px rgba(212,175,55,0.15); }
+          100% { box-shadow: 0 0 0 0 rgba(212,175,55,0); }
         }
       `}</style>
     </Layout>
   );
-                   }
+      }
