@@ -1,5 +1,5 @@
-import { generateChatCompletion } from '../../../lib/aiProvider';
-import pool from '../../../lib/db';
+import { generateChatCompletion } from '../../lib/aiProvider';
+import pool from '../../lib/db';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     if (personRes.rows.length === 0) return res.status(404).json({ error: 'Person not found' });
     const person = personRes.rows[0];
 
-    // Fetch timeline and church profile (same as draft endpoint)
+    // Fetch timeline and church profile
     const timelineRes = await pool.query(
       `SELECT * FROM timeline_events WHERE person_id = $1 ORDER BY created_at DESC LIMIT 10`,
       [person_id]
