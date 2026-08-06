@@ -1,5 +1,5 @@
-import pool from '../../../lib/db';
-import { generateChatCompletion } from '../../../lib/aiProvider';
+import pool from '../../lib/db';
+import { generateChatCompletion } from '../../lib/aiProvider';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -46,7 +46,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Generate draft
+    // Generate draft using the configured AI provider
     const systemPrompt = `You are ARIA, an assistant for FIDUCIA CARE. You write warm, personalised follow‑up messages to church members. Use the person's history, church schedule, and any recent interactions. Keep the message under 160 characters. Be specific and caring. Do not include placeholders.`;
 
     const draftMessage = await generateChatCompletion({
@@ -68,4 +68,4 @@ export default async function handler(req, res) {
     console.error('ARIA draft error:', error);
     return res.status(500).json({ error: error.message });
   }
-  }
+}
