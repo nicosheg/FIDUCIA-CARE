@@ -14,8 +14,8 @@ export default function CommunityPage() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [form, setForm] = useState({ full_name: '', phone: '', type: 'visitor' });
   const [selectedPerson, setSelectedPerson] = useState(null);
-  const [addingMemory, setAddingMemory] = useState(false);
-  const [memoryText, setMemoryText] = useState('');
+  const [addingNote, setAddingNote] = useState(false);
+  const [noteText, setNoteText] = useState('');
   const [importingConversation, setImportingConversation] = useState(false);
   const [conversationText, setConversationText] = useState('');
 
@@ -70,31 +70,53 @@ export default function CommunityPage() {
     });
     const data = await res.json();
     if (data.message) {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(data.message);
-        setMessage('Draft copied – ready to paste');
+      // Show the draft in a modal with an "Open WhatsApp" button
+      const draft = data.message;
+      if (confirm(draft + '\n\nOpen WhatsApp to send?')) {
+        // Build WhatsApp deep link and open in new tab
+        const person = people.find(p => p.id === personId);
+        if (person && person.phone) {
+          const phone = person.phone.startsWith('+') ? person.phone.substring(1) : person.phone;
+          const url = `https://wa.me/${phone}?text=${encodeURIComponent(draft)}`;
+          window.open(url, '_blank');
+          // Record message sent in timeline
+          await fetch('/api/timeline', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              person_id: personId,
+              event_type: 'message_sent',
+              channel: 'whatsapp',
+              description: draft.substring(0, 100),
+              organization_id: ORG_ID,
+              metadata: { type: 'manual_send' },
+            }),
+          });
+          setMessage('Message opened in WhatsApp');
+          setTimeout(() => setMessage(''), 3000);
+        }
       }
     } else setMessage('Error: ' + (data.error || 'Draft failed'));
     setTimeout(() => setMessage(''), 3000);
   };
 
-  const saveMemory = async () => {
-    if (!memoryText.trim()) return;
+  const saveNote = async () => {
+    if (!noteText.trim()) return;
     await fetch('/api/timeline', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         person_id: selectedPerson.id,
-        event_type: 'memory',
+        event_type: 'note',
         channel: 'manual',
-        description: memoryText.trim(),
+        description: noteText.trim(),
         organization_id: ORG_ID,
-        metadata: { type: 'guided_memory' },
+        metadata: { type: 'pastoral_note' },
       }),
     });
-    setMemoryText('');
-    setAddingMemory(false);
-    setMessage('Memory saved');
+    setNoteText('');
+    setAddingNote(false);
+    setMessage('Note saved');
     setTimeout(() => setMessage(''), 3000);
   };
 
@@ -215,65 +237,111 @@ export default function CommunityPage() {
                     </span>
                   </div>
                   <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 4 }}>{person.phone || 'No phone'}</div>
-                  {person.last_contacted && (
+                  {person.last_attended_date && (
+                    <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4 }}>
+                      Last attended: {new Date(person.last_attended_date).toLocaleDateString()}
+                    </div>
+                  )}
+                  {person.last_contacted ? (
                     <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4 }}>
                       Last contacted: {new Date(person.last_contacted).toLocaleDateString()}
                     </div>
+                  ) : (
+                    <div style={{ color: '#F59E0B', fontSize: 12, marginBottom: 4 }}>Never contacted</div>
                   )}
 
                   {selectedPerson?.id === person.id && (
-                    <div style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div
+                      style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }}
+                      onClick={(e) => e.stopPropagation()}   // ← prevent collapse
+                    >
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-                        <button onClick={() => generateDraft(person.id)} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Draft Message</button>
-                        <Link href={`/person/${person.id}`} className="fiducia-button fiducia-button-secondary" style={{ padding: '6px 12px', fontSize: 13 }}>Journey →</Link>
-                        <button onClick={() => setAddingMemory(true)} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>
-                          Remember something
+                        <button
+                          onClick={(e) => { e.stopPropagation(); generateDraft(person.id); }}
+                          className="fiducia-button fiducia-button-primary"
+                          style={{ padding: '6px 12px', fontSize: 13 }}
+                        >
+                          Draft & Send WhatsApp
                         </button>
-                        <button onClick={() => setImportingConversation(true)} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>
+                        <Link href={`/person/${person.id}`} className="fiducia-button fiducia-button-secondary"
+                          style={{ padding: '6px 12px', fontSize: 13 }}>Journey →</Link>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setAddingNote(true); }}
+                          className="fiducia-button fiducia-button-ghost"
+                          style={{ padding: '6px 12px', fontSize: 13 }}
+                        >
+                          Add pastoral note
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setImportingConversation(true); }}
+                          className="fiducia-button fiducia-button-ghost"
+                          style={{ padding: '6px 12px', fontSize: 13 }}
+                        >
                           Import Conversation
                         </button>
                       </div>
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={() => handleDelete(person.id, null)} className="fiducia-button fiducia-button-ghost" style={{ padding: '4px 10px', fontSize: 13 }}>Remove</button>
+                        <button
+                          onClick={(e) => handleDelete(person.id, e)}
+                          className="fiducia-button fiducia-button-ghost"
+                          style={{ padding: '4px 10px', fontSize: 13 }}
+                        >
+                          Remove
+                        </button>
                       </div>
                     </div>
                   )}
 
-                  {/* Guided Memory form */}
-                  {addingMemory && selectedPerson?.id === person.id && (
-                    <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
-                      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>What would you like ARIA to remember?</p>
+                  {/* Pastoral note form */}
+                  {addingNote && selectedPerson?.id === person.id && (
+                    <div
+                      style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>What happened today?</p>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-                        {['Prayer request', 'Life update', 'Feeling unwell', 'New job', 'Family news', 'Other'].map(prompt => (
-                          <button key={prompt} onClick={() => setMemoryText(prompt + ': ')}
+                        {[
+                          { emoji: '🙏', label: 'Asked for prayer' },
+                          { emoji: '❤️', label: 'First-time visitor' },
+                          { emoji: '😊', label: 'Shared good news' },
+                          { emoji: '🤒', label: 'Sick or recovering' },
+                          { emoji: '👨‍👩‍👧', label: 'Family situation' },
+                          { emoji: '💼', label: 'Work or school' },
+                          { emoji: '📝', label: 'Other' },
+                        ].map(prompt => (
+                          <button key={prompt.label}
+                            onClick={(e) => { e.stopPropagation(); setNoteText(prompt.emoji + ' ' + prompt.label + ': '); }}
                             style={{
                               background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
                               color: '#D4AF37', borderRadius: 8, padding: '4px 10px', fontSize: 12, cursor: 'pointer'
                             }}>
-                            {prompt}
+                            {prompt.emoji} {prompt.label}
                           </button>
                         ))}
                       </div>
-                      <textarea value={memoryText} onChange={e => setMemoryText(e.target.value)} placeholder="Type what happened..." rows={3}
+                      <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add more details..." rows={3}
                         style={{ width: '100%', padding: 8, borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#fff', resize: 'vertical', outline: 'none', marginBottom: 8 }}
                       />
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={saveMemory} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
-                        <button onClick={() => { setAddingMemory(false); setMemoryText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
+                        <button onClick={(e) => { e.stopPropagation(); saveNote(); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
+                        <button onClick={(e) => { e.stopPropagation(); setAddingNote(false); setNoteText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
                       </div>
                     </div>
                   )}
 
                   {/* Conversation Import form */}
                   {importingConversation && selectedPerson?.id === person.id && (
-                    <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <div
+                      style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>Paste your WhatsApp, SMS, or notes conversation here.</p>
                       <textarea value={conversationText} onChange={e => setConversationText(e.target.value)} placeholder="Paste conversation..." rows={4}
                         style={{ width: '100%', padding: 8, borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#fff', resize: 'vertical', outline: 'none', marginBottom: 8 }}
                       />
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={importConversation} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Parse & Save</button>
-                        <button onClick={() => { setImportingConversation(false); setConversationText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
+                        <button onClick={(e) => { e.stopPropagation(); importConversation(); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Parse & Save</button>
+                        <button onClick={(e) => { e.stopPropagation(); setImportingConversation(false); setConversationText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
                       </div>
                     </div>
                   )}
@@ -288,4 +356,4 @@ export default function CommunityPage() {
       </div>
     </Layout>
   );
-         }
+    }
