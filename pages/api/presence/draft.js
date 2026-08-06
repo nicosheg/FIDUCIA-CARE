@@ -1,5 +1,5 @@
-import pool from '../../lib/db';
-import { generateChatCompletion } from '../../lib/aiProvider';
+import pool from '../../../lib/db';
+import { generateChatCompletion } from '../../../lib/aiProvider';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -68,4 +68,4 @@ export default async function handler(req, res) {
     console.error('ARIA draft error:', error);
     return res.status(500).json({ error: error.message });
   }
-}
+       }
