@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import Layout from '../components/Layout'; // ✅ correct path
+import Layout from '../components/Layout';
 
 export default function CareQueue() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
 
   const fetchQueue = async () => {
     setLoading(true);
@@ -16,6 +17,25 @@ export default function CareQueue() {
       console.error(e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // "ARIA Scan" – triggers a fresh intelligence scan
+  const runAriaScan = async () => {
+    setScanning(true);
+    try {
+      // POST to the same API with a flag to regenerate intelligence
+      await fetch('/api/care-queue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'scan' }),
+      });
+      // Then re-fetch the updated queue
+      await fetchQueue();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setScanning(false);
     }
   };
 
@@ -39,16 +59,28 @@ export default function CareQueue() {
   return (
     <Layout>
       <div style={{ maxWidth: 700, margin: '0 auto', padding: '40px 20px' }}>
-        <h1 style={{ fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 24 }}>
-          Care Queue
-          <span style={{ fontSize: 16, fontWeight: 400, color: 'rgba(255,255,255,0.3)', marginLeft: 12 }}>
-            {items.length} items
-          </span>
-        </h1>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 600, color: '#f0f0f0' }}>
+            Care Queue
+            <span style={{ fontSize: 16, fontWeight: 400, color: 'rgba(255,255,255,0.3)', marginLeft: 12 }}>
+              {items.length} items
+            </span>
+          </h1>
+          <button
+            onClick={runAriaScan}
+            disabled={scanning}
+            className="fiducia-button fiducia-button-primary"
+            style={{ padding: '8px 16px', fontSize: 13, opacity: scanning ? 0.6 : 1 }}
+          >
+            {scanning ? 'Scanning…' : 'ARIA Scan'}
+          </button>
+        </div>
 
         {items.length === 0 ? (
           <div className="fiducia-card" style={{ textAlign: 'center', padding: '40px 20px' }}>
-            <p className="aria-speaks" style={{ fontSize: 18, margin: 0 }}>Everyone is well cared for today.</p>
+            <p className="aria-speaks" style={{ fontSize: 18, margin: 0 }}>
+              ARIA is looking after everyone. No pending care items.
+            </p>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -57,7 +89,7 @@ export default function CareQueue() {
                 <div>
                   <p className="aria-speaks" style={{ margin: 0, fontSize: 17 }}>{item.text}</p>
                   <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
-                    Priority: {item.priority}
+                    {item.priority === 'high' ? 'High priority' : 'Medium priority'}
                   </p>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -68,7 +100,10 @@ export default function CareQueue() {
                       const phone = item.phone || '';
                       if (phone) {
                         const clean = phone.startsWith('+') ? phone.substring(1) : phone;
-                        const message = encodeURIComponent("Just checking in – how are you doing?");
+                        // ARIA drafts a warm message
+                        const message = encodeURIComponent(
+                          `Hello ${item.first_name || ''}, just checking in – ARIA wanted me to see how you're doing.`
+                        );
                         window.open(`https://wa.me/${clean}?text=${message}`, '_blank');
                       } else {
                         alert('No phone number for this person.');
@@ -89,15 +124,7 @@ export default function CareQueue() {
             ))}
           </div>
         )}
-
-        <button
-          onClick={fetchQueue}
-          className="fiducia-button fiducia-button-secondary"
-          style={{ marginTop: 20, width: '100%' }}
-        >
-          Refresh
-        </button>
       </div>
     </Layout>
   );
-}
+                    }
