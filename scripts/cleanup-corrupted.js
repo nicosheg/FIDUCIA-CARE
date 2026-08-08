@@ -3,32 +3,30 @@ const pool = require('../lib/db');
 async function cleanup() {
   const client = await pool.connect();
   try {
-    // Find suspicious records:
-    // - name longer than 100 chars
-    // - name containing reasoning patterns
-    // - name with <think>, markdown, etc.
-    // - name with multiple sentences (contains . ? !)
     const suspicious = await client.query(`
       SELECT id, first_name, phone, created_at
       FROM people
       WHERE organization_id = 'demo-org'
         AND (
-          LENGTH(first_name) > 100
+          LENGTH(first_name) > 50
+          OR first_name ILIKE '%**%'
+          OR first_name ~ '^[0-9]+\.'
+          OR first_name ILIKE '%let''s%'
+          OR first_name ILIKE '%re-read%'
+          OR first_name ILIKE '%carefully%'
+          OR first_name ILIKE '%illegible%'
+          OR first_name ILIKE '%faint%'
+          OR first_name ILIKE '%->%'
           OR first_name ILIKE '%<think>%'
           OR first_name ILIKE '%the user wants%'
           OR first_name ILIKE '%analyze the image%'
           OR first_name ILIKE '%i will%'
-          OR first_name ILIKE '%let''s%'
-          OR first_name ~ '[.!?][A-Z]'  -- multiple sentences
-          OR first_name LIKE '```%'     -- markdown
-          OR first_name LIKE '%```%'
         )
     `);
 
     console.log(`Found ${suspicious.rows.length} suspicious records.`);
     console.table(suspicious.rows);
 
-    // Ask for confirmation before deletion
     const readline = require('readline').createInterface({
       input: process.stdin,
       output: process.stdout,
