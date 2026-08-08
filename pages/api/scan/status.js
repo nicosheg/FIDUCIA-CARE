@@ -12,26 +12,45 @@ export default async function handler(req, res) {
     if (jobRes.rows.length === 0) return res.status(404).json({ error: 'Job not found' });
 
     const job = jobRes.rows[0];
+    let result = job.result ? JSON.parse(job.result) : null;
     let message = '';
+    let status = job.status;
 
-    if (job.status === 'processing') {
+    // Build friendly message based on status and result
+    if (status === 'pending' || status === 'queued') {
+      message = 'ARIA is preparing to read the register…';
+    } else if (status === 'processing') {
       message = 'ARIA is reading your register…';
-    } else if (job.status === 'retrying') {
-      message = 'ARIA is busy analysing your register. This may take a little longer than usual.';
-    } else if (job.status === 'complete') {
+    } else if (status === 'retrying') {
+      // Use stored retry message if present, else default
+      message = result?.message || 'ARIA is taking a little longer than usual…';
+    } else if (status === 'complete') {
       message = 'Scan complete.';
-    } else if (job.status === 'failed') {
-      message = 'ARIA could not read the register. Please try again with a clearer photo.';
+    } else if (status === 'failed') {
+      // Always show friendly message
+      const errorMsg = result?.error || 'ARIA could not read the register. Please try again with a clearer photo.';
+      // If the stored error looks raw, override with generic
+      if (errorMsg.includes('Rate limit') || errorMsg.includes('rate limit') || 
+          errorMsg.includes('Groq') || errorMsg.includes('API') || errorMsg.includes('tokens')) {
+        message = 'ARIA is very busy right now. Please try again in a few minutes.';
+      } else {
+        message = errorMsg;
+      }
+    } else {
+      message = 'ARIA is preparing…';
     }
 
+    // Return sanitized response
     res.status(200).json({
-      status: job.status,
+      status: status,
       progress: job.progress,
       message,
-      retry_count: job.retry_count,
-      result: job.result,
+      retry_count: job.retry_count || 0,
+      // Only return result if complete
+      result: status === 'complete' ? result : null,
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Status error:', error);
+    res.status(500).json({ error: 'ARIA is having trouble. Please try again.' });
   }
-        }
+                                           }
