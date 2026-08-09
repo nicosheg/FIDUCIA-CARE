@@ -1,3 +1,96 @@
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/router';
+import Layout from '../components/Layout';
+import { getScanState, setScanState, clearScanState } from '../lib/scanStore';
+
+export default function ScanPage() {
+  const router = useRouter();
+  const fileInputRef = useRef(null);
+  const [programName, setProgramName] = useState('GIBEON');
+  const [scanState, setScanStateLocal] = useState(getScanState());
+  const [progressMessage, setProgressMessage] = useState('');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [completionTimestamp, setCompletionTimestamp] = useState(null);
+  const [celebration, setCelebration] = useState(false);
+  const pollRef = useRef(null);
+  const timerRef = useRef(null);
+
+  const syncState = useCallback(() => {
+    setScanStateLocal(getScanState());
+  }, []);
+
+  useEffect(() => {
+    const current = getScanState();
+    syncState();
+    if (current.stage === 'processing' && current.jobId) {
+      startPolling(current.jobId);
+    }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  const updateState = (newState) => {
+    setScanState(newState);
+    syncState();
+  };
+
+  // Image preprocessing (unchanged)
+  const preprocessImage = (file) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(img.src);
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const max = 600;
+        let w = img.width, h = img.height;
+        if (w > max) { h = (h * max) / w; w = max; }
+        if (h > max) { w = (w * max) / h; h = max; }
+        canvas.width = w; canvas.height = h;
+        ctx.drawImage(img, 0, 0, w, h);
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const d = imgData.data;
+        for (let i = 0; i < d.length; i += 4) {
+          let g = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+          g = ((g - 128) * 1.4) + 128;
+          g = Math.min(255, Math.max(0, g));
+          d[i] = d[i + 1] = d[i + 2] = g;
+        }
+        ctx.putImageData(imgData, 0, 0);
+        const sharp = [0, -1, 0, -1, 5, -1, 0, -1, 0];
+        const sharpData = ctx.getImageData(0, 0, w, h);
+        const out = new Uint8ClampedArray(sharpData.data);
+        for (let y = 1; y < h - 1; y++) {
+          for (let x = 1; x < w - 1; x++) {
+            let r = 0, g = 0, b = 0;
+            for (let ky = -1; ky <= 1; ky++) {
+              for (let kx = -1; kx <= 1; kx++) {
+                const idx = ((y + ky) * w + (x + kx)) * 4;
+                const wgt = sharp[(ky + 1) * 3 + (kx + 1)];
+                r += sharpData.data[idx] * wgt;
+                g += sharpData.data[idx + 1] * wgt;
+                b += sharpData.data[idx + 2] * wgt;
+              }
+            }
+            const i = (y * w + x) * 4;
+            out[i] = Math.min(255, Math.max(0, r));
+            out[i + 1] = Math.min(255, Math.max(0, g));
+            out[i + 2] = Math.min(255, Math.max(0, b));
+          }
+        }
+        ctx.putImageData(new ImageData(out, w, h), 0, 0);
+        canvas.toBlob(blob => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result.split(',')[1]);
+          reader.readAsDataURL(blob);
+        }, 'image/jpeg', 0.7);
+      };
+    });
+  };
+
   // Polling with honest elapsed time
   const startPolling = (jobId) => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -11,11 +104,9 @@
       try {
         const res = await fetch(`/api/scan/status?job_id=${jobId}`);
         const data = await res.json();
-        // Update message from backend
         if (data.message) {
           setProgressMessage(data.message);
         }
-        // Show elapsed if available
         if (data.elapsed_seconds) {
           setElapsedSeconds(data.elapsed_seconds);
         }
@@ -37,7 +128,7 @@
     }, 2000);
   };
 
-  // Reveal results (unchanged from original logic)
+  // Reveal results
   const revealResults = async (resultData) => {
     const people = resultData?.people || [];
     updateState({ stage: 'revealing', revealedPeople: [], ariaMessages: [] });
@@ -48,7 +139,6 @@
       updateState({ revealedPeople: revealed });
     }
 
-    // Build summary from result
     const stats = resultData?.stats || {};
     const newVisitors = stats.totalNew || 0;
     const returning = stats.totalMatched || 0;
@@ -231,9 +321,8 @@
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 20 }}>
               {summary.newVisitors > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#34D399', fontSize: 15 }}><span>{summary.newVisitors} first-time visitors</span></div>}
               {summary.returning > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#D4AF37', fontSize: 15 }}><span>{summary.returning} familiar faces returning</span></div>}
-              {summary.regulars > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#60A5FA', fontSize: 15 }}><span>{summary.regulars} regular members</span></div>}
               {summary.duplicates > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#F59E0B', fontSize: 15 }}><span>{summary.duplicates} familiar faces recognised</span></div>}
-              {summary.needsReview > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontSize: 15 }}><span>{summary.needsReview} needs your attention</span></div>}
+              {summary.needsReview > 0 && <div style={{ display: 'flex', justifyContent: 'space-between', color: '#EF4444', fontSize: 15 }}><span>{summary.needsReview} need your attention</span></div>}
             </div>
             <p className="aria-speaks" style={{ marginBottom: 20, fontSize: 14 }}>ARIA has finished preparing your community.</p>
             <button onClick={() => router.push('/community')} className="fiducia-button fiducia-button-primary" style={{ width: '100%' }}>View Community</button>
@@ -267,4 +356,4 @@
       `}</style>
     </Layout>
   );
-      }
+  }
