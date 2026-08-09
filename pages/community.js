@@ -24,7 +24,7 @@ const ICONS = {
   other: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>),
 };
 
-// ── Suspicious name detection (for cleanup) ──
+// ── Suspicious name detection ──
 const SUSPICIOUS_PATTERNS = [
   /\*\*/, /->/, /Line \d+/, /Let's/, /re-read/, /carefully/,
   /illegible/, /faint/, /<think>/, /the user wants/,
@@ -49,17 +49,18 @@ export default function CommunityPage() {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [form, setForm] = useState({ full_name: '', phone: '', type: 'visitor' });
+  const [form, setForm] = useState({ full_name: '', phone: '', type: 'visitor', birthday: '' });
   const [selectedPerson, setSelectedPerson] = useState(null);
   const [addingNote, setAddingNote] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [importingConversation, setImportingConversation] = useState(false);
   const [conversationText, setConversationText] = useState('');
 
-  // Inline editing state
+  // Inline editing state (with birthday)
   const [editingPerson, setEditingPerson] = useState(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editBirthday, setEditBirthday] = useState('');
 
   // Selection mode
   const [selectMode, setSelectMode] = useState(false);
@@ -154,6 +155,7 @@ export default function CommunityPage() {
     if (person) {
       setEditName(person.first_name || '');
       setEditPhone(person.phone || '');
+      setEditBirthday(person.birthday || '');
       setEditingPerson(id);
     }
   };
@@ -162,9 +164,17 @@ export default function CommunityPage() {
     if (!editName.trim()) return;
     await fetch('/api/people', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: personId, first_name: editName.trim(), last_name: '', phone: editPhone, type: people.find(p => p.id === personId)?.type || 'visitor', organization_id: ORG_ID }),
+      body: JSON.stringify({
+        id: personId,
+        first_name: editName.trim(),
+        last_name: '',
+        phone: editPhone,
+        type: people.find(p => p.id === personId)?.type || 'visitor',
+        birthday: editBirthday || null,
+        organization_id: ORG_ID,
+      }),
     });
-    setPeople(prev => prev.map(p => p.id === personId ? { ...p, first_name: editName.trim(), phone: editPhone } : p));
+    setPeople(prev => prev.map(p => p.id === personId ? { ...p, first_name: editName.trim(), phone: editPhone, birthday: editBirthday || null } : p));
     setEditingPerson(null);
     cancelSelectMode();
     setMessage('Updated');
@@ -179,12 +189,19 @@ export default function CommunityPage() {
     if (!form.full_name.trim()) return;
     const res = await fetch('/api/people', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ first_name: form.full_name.trim(), last_name: '', phone: form.phone, organization_id: ORG_ID, type: form.type }),
+      body: JSON.stringify({
+        first_name: form.full_name.trim(),
+        last_name: '',
+        phone: form.phone,
+        organization_id: ORG_ID,
+        type: form.type,
+        birthday: form.birthday || null,
+      }),
     });
     const data = await res.json();
     if (data.id) {
       setPeople(prev => [data, ...prev]);
-      setForm({ full_name: '', phone: '', type: 'visitor' });
+      setForm({ full_name: '', phone: '', type: 'visitor', birthday: '' });
       setShowAddForm(false);
       setMessage('Person added');
       setTimeout(() => setMessage(''), 3000);
@@ -287,7 +304,7 @@ export default function CommunityPage() {
             <option value="member">Member</option>
           </select>
 
-          {/* NEW: Suspicious filter toggle */}
+          {/* Suspicious filter toggle */}
           <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
             <input
               type="checkbox"
@@ -306,7 +323,8 @@ export default function CommunityPage() {
         {showAddForm && (
           <form onSubmit={addPerson} className="fiducia-card" style={{ padding: 20, marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <input placeholder="Full name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} required style={miniInput} />
-            <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} required style={miniInput} />
+            <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={miniInput} />
+            <input type="date" value={form.birthday} onChange={e => setForm({ ...form, birthday: e.target.value })} style={miniInput} />
             <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={miniInput}>
               <option value="visitor">Visitor</option>
               <option value="member">Member</option>
@@ -340,18 +358,17 @@ export default function CommunityPage() {
                 position: 'relative',
               }}
             >
-              {/* Checkbox in selection mode */}
               {selectMode && (
                 <div style={{ position: 'absolute', top: 10, right: 10 }}>
                   {selectedIds.has(person.id) ? ICONS.check : <div style={{ width: 16, height: 16, borderRadius: 4, border: '1px solid rgba(255,255,255,0.3)' }} />}
                 </div>
               )}
 
-              {/* Inline editing (from Edit button in selection bar) */}
               {editingPerson === person.id ? (
                 <div onClick={stopProp} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <input value={editName} onChange={e => setEditName(e.target.value)} style={miniInput} />
                   <input value={editPhone} onChange={e => setEditPhone(e.target.value)} style={miniInput} />
+                  <input type="date" value={editBirthday || ''} onChange={e => setEditBirthday(e.target.value)} style={miniInput} />
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={(e) => { e.stopPropagation(); saveEdit(person.id); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
                     <button onClick={(e) => { e.stopPropagation(); cancelEditing(); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
@@ -359,7 +376,6 @@ export default function CommunityPage() {
                 </div>
               ) : (
                 <>
-                  {/* Card header */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -376,6 +392,11 @@ export default function CommunityPage() {
                   <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
                     {ICONS.phone} {person.phone || 'No phone'}
                   </div>
+                  {person.birthday && (
+                    <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {ICONS.calendar} Birthday: {new Date(person.birthday).toLocaleDateString()}
+                    </div>
+                  )}
                   {person.last_attended_date && (
                     <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
                       {ICONS.calendar} Last attended: {new Date(person.last_attended_date).toLocaleDateString()}
@@ -391,7 +412,6 @@ export default function CommunityPage() {
                     </div>
                   )}
 
-                  {/* Expanded actions (tap) */}
                   {selectedPerson?.id === person.id && !selectMode && !editingPerson && (
                     <div
                       style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }}
@@ -417,7 +437,6 @@ export default function CommunityPage() {
                     </div>
                   )}
 
-                  {/* Pastoral note form – glowing SVG prompts */}
                   {addingNote && selectedPerson?.id === person.id && (
                     <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }} onClick={stopProp}>
                       <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>What happened today?</p>
@@ -444,7 +463,6 @@ export default function CommunityPage() {
                     </div>
                   )}
 
-                  {/* Conversation Import form */}
                   {importingConversation && selectedPerson?.id === person.id && (
                     <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }} onClick={stopProp}>
                       <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>Paste your WhatsApp, SMS, or notes conversation here.</p>
@@ -462,7 +480,6 @@ export default function CommunityPage() {
         </div>
       </div>
 
-      {/* Styles (unchanged) */}
       <style jsx>{`
         .fiducia-card { background: rgba(20,25,40,0.9); border-radius: 26px; border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 0 10px rgba(212,175,55,0.03); transition: border-color 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease; padding: 24px; margin-bottom: 18px; animation: cardBreathe 20s ease-in-out infinite alternate; }
         @keyframes cardBreathe { 0% { box-shadow: inset 0 0 10px rgba(212,175,55,0.03); } 100% { box-shadow: inset 0 0 14px rgba(212,175,55,0.06); } }
