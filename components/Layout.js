@@ -170,7 +170,7 @@ export default function Layout({ children }) {
           transform: scale(0.99);
         }
 
-        /* ---------- Shimmer skeleton (used on Home) ---------- */
+        /* ---------- Shimmer skeleton ---------- */
         .shimmer {
           background: linear-gradient(
             90deg,
@@ -184,6 +184,16 @@ export default function Layout({ children }) {
         @keyframes shimmer {
           0% { background-position: -200% 0; }
           100% { background-position: 200% 0; }
+        }
+
+        /* ---------- Birthday Picker Animations ---------- */
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideUp {
+          from { transform: translateY(100%); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
 
         /* ---------- Buttons – invitation hierarchy ---------- */
