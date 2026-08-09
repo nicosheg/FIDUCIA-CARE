@@ -5,7 +5,7 @@ import BirthdayPicker from '../components/BirthdayPicker';
 
 const ORG_ID = 'demo-org';
 
-// ── Glowing SVG icons (no emojis) ──
+// ── Glowing SVG icons ──
 const ICONS = {
   visitor: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 4-7 8-7s8 3 8 7" /></svg>),
   phone: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12" y2="18.01" stroke="currentColor" strokeWidth="3" /></svg>),
@@ -41,7 +41,6 @@ function isSuspicious(name) {
   return false;
 }
 
-// Helper to calculate next birthday
 function getNextBirthday(birthday) {
   if (!birthday) return null;
   const today = new Date();
@@ -70,13 +69,11 @@ export default function CommunityPage() {
   const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
   const [pickerTarget, setPickerTarget] = useState(null);
 
-  // Inline editing
   const [editingPerson, setEditingPerson] = useState(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editBirthday, setEditBirthday] = useState('');
 
-  // Selection mode
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const longPressTimer = useRef(null);
@@ -88,7 +85,6 @@ export default function CommunityPage() {
     if (Array.isArray(data)) { setPeople(data); setLoading(false); }
   };
 
-  // Filter effect
   useEffect(() => {
     let result = [...people];
     if (roleFilter !== 'all') result = result.filter(p => p.type === roleFilter);
@@ -102,7 +98,6 @@ export default function CommunityPage() {
     setFiltered(result);
   }, [people, search, roleFilter, showSuspicious]);
 
-  // ─── Long‑press → select mode ───
   const onPointerDown = useCallback((personId) => {
     longPressTimer.current = setTimeout(() => {
       setSelectMode(true);
@@ -129,17 +124,11 @@ export default function CommunityPage() {
   };
 
   const selectAll = () => setSelectedIds(new Set(filtered.map(p => p.id)));
+  const cancelSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
 
-  const cancelSelectMode = () => {
-    setSelectMode(false);
-    setSelectedIds(new Set());
-  };
-
-  // ─── Bulk Delete (instant) ───
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`Remove ${selectedIds.size} selected people? This also removes their attendance, timeline, and care records.`)) return;
-
     const ids = Array.from(selectedIds);
     try {
       const res = await fetch('/api/people/delete', {
@@ -161,7 +150,6 @@ export default function CommunityPage() {
     cancelSelectMode();
   };
 
-  // ─── Edit from selection bar ───
   const startEditing = () => {
     if (selectedIds.size !== 1) return;
     const id = selectedIds.values().next().value;
@@ -197,7 +185,6 @@ export default function CommunityPage() {
 
   const cancelEditing = () => setEditingPerson(null);
 
-  // ─── Other actions ───
   const addPerson = async e => {
     e.preventDefault();
     if (!form.full_name.trim()) return;
@@ -261,7 +248,6 @@ export default function CommunityPage() {
     setTimeout(() => setMessage(''), 3000);
   };
 
-  // ─── Single delete (instant) ───
   const handleDelete = async (personId, e) => {
     if (e) e.stopPropagation();
     if (!confirm('Remove this person? This also removes their attendance, timeline, and care records.')) return;
@@ -294,7 +280,6 @@ export default function CommunityPage() {
           {people.length} lives remembered
         </h1>
 
-        {/* Selection bar */}
         {selectMode && (
           <div style={selectBar}>
             <span style={{ color: '#f0f0f0', fontWeight: 600 }}>{selectedIds.size} selected</span>
@@ -307,7 +292,6 @@ export default function CommunityPage() {
           </div>
         )}
 
-        {/* Controls */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
           <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)}
             style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none' }} />
@@ -319,11 +303,7 @@ export default function CommunityPage() {
           </select>
 
           <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input
-              type="checkbox"
-              checked={showSuspicious}
-              onChange={() => setShowSuspicious(!showSuspicious)}
-            />
+            <input type="checkbox" checked={showSuspicious} onChange={() => setShowSuspicious(!showSuspicious)} />
             Show suspicious/corrupted only
             <span style={{ fontSize: 11, color: '#EF4444' }}>
               ({people.filter(p => isSuspicious(p.first_name)).length})
@@ -337,7 +317,6 @@ export default function CommunityPage() {
           <form onSubmit={addPerson} className="fiducia-card" style={{ padding: 20, marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <input placeholder="Full name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} required style={miniInput} />
             <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={miniInput} />
-            {/* Birthday field - FIDUCIA style */}
             <div style={{ marginBottom: 8 }}>
               <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
                 <span style={{ color: '#D4AF37', marginRight: 6 }}>●</span>
@@ -380,7 +359,6 @@ export default function CommunityPage() {
           <div className="fiducia-card" style={{ padding: 10, marginBottom: 15, color: '#34D399', textAlign: 'center' }}>{message}</div>
         )}
 
-        {/* Cards grid */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 20 }}>
           {filtered.map(person => (
             <div
@@ -453,9 +431,7 @@ export default function CommunityPage() {
                         {ICONS.visitor} {person.type || 'visitor'}
                       </span>
                       {isSuspicious(person.first_name) && (
-                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 12, background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>
-                          ⚠️
-                        </span>
+                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 12, background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>⚠️</span>
                       )}
                     </div>
                   </div>
@@ -487,10 +463,7 @@ export default function CommunityPage() {
                   )}
 
                   {selectedPerson?.id === person.id && !selectMode && !editingPerson && (
-                    <div
-                      style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }}
-                      onClick={stopProp}
-                    >
+                    <div style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={stopProp}>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
                         <button onClick={(e) => { e.stopPropagation(); generateDraft(person.id); }} className="fiducia-button fiducia-button-primary" style={actionBtnStyle}>
                           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.mail} Draft & Send WhatsApp</span>
@@ -554,7 +527,6 @@ export default function CommunityPage() {
         </div>
       </div>
 
-      {/* Birthday Picker */}
       {showBirthdayPicker && (
         <BirthdayPicker
           isOpen={true}
@@ -587,9 +559,10 @@ export default function CommunityPage() {
   );
 }
 
-// Local styles
+// ── Local styles ──
 const miniInput = { padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.6)', color: '#fff', outline: 'none' };
 const textareaStyle = { width: '100%', padding: 8, borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#fff', resize: 'vertical', outline: 'none', marginBottom: 8 };
 const actionBtnStyle = { padding: '6px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 };
 const promptBtnStyle = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#D4AF37', borderRadius: 8, padding: '6px 12px', fontSize: 12, cursor: 'pointer' };
-const selectBar = { position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', backgro
+const selectBar = { position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', background: 'rgba(10,15,26,0.9)', backdropFilter: 'blur(20px)', borderRadius: 20, padding: '12px 24px', display: 'flex', gap: 16, zIndex: 1001, border: '1px solid rgba(255,255,255,0.06)' };
+const barBtn = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 10, padding: '8px 16px', fontSize: 13, cursor: 'pointer', backdropFilter: 'blur(10px)' };
