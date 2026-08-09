@@ -5,11 +5,7 @@ export default async function handler(req, res) {
 
   // POST: ARIA Scan – optionally update or regenerate care items
   if (req.method === 'POST') {
-    // For now, we just log and return success.
-    // In the future, this could call a more sophisticated intelligence layer.
     console.log(`ARIA scan triggered for org: ${orgId}`);
-    // Optionally, we could insert new care items into a table, but we don't have one yet.
-    // We'll just return a success.
     return res.status(200).json({ message: 'ARIA scan complete.' });
   }
 
@@ -33,14 +29,15 @@ export default async function handler(req, res) {
         LIMIT 20
       `, [orgId]);
 
-      // 2. Birthdays this week
+      // 2. Birthdays this week – FIXED: use metadata->>'birthday'
       const birthday = await pool.query(`
-        SELECT id, first_name, phone, birthday
+        SELECT id, first_name, phone, metadata->>'birthday' as birthday
         FROM people
-        WHERE birthday IS NOT NULL
-          AND EXTRACT(MONTH FROM birthday) = EXTRACT(MONTH FROM CURRENT_DATE)
-          AND EXTRACT(DAY FROM birthday) BETWEEN EXTRACT(DAY FROM CURRENT_DATE) 
-                                            AND EXTRACT(DAY FROM CURRENT_DATE) + 7
+        WHERE metadata->>'birthday' IS NOT NULL
+          AND EXTRACT(MONTH FROM TO_DATE(metadata->>'birthday', 'YYYY-MM-DD')) = EXTRACT(MONTH FROM CURRENT_DATE)
+          AND EXTRACT(DAY FROM TO_DATE(metadata->>'birthday', 'YYYY-MM-DD')) 
+              BETWEEN EXTRACT(DAY FROM CURRENT_DATE) 
+              AND EXTRACT(DAY FROM CURRENT_DATE) + 7
       `);
 
       // 3. Open prayer requests
@@ -95,4 +92,4 @@ export default async function handler(req, res) {
     res.setHeader('Allow', ['GET', 'POST']);
     res.status(405).end(`Method ${req.method} Not Allowed`);
   }
-                                            }
+            }
