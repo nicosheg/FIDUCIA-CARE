@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Layout from '../components/Layout';
+import BirthdayPicker from '../components/BirthdayPicker';
 
 const ORG_ID = 'demo-org';
 
@@ -40,6 +41,16 @@ function isSuspicious(name) {
   return false;
 }
 
+function getNextBirthday(birthday) {
+  if (!birthday) return null;
+  const today = new Date();
+  const bday = new Date(birthday);
+  bday.setFullYear(today.getFullYear());
+  if (bday < today) bday.setFullYear(today.getFullYear() + 1);
+  const diffTime = bday - today;
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
 export default function CommunityPage() {
   const [people, setPeople] = useState([]);
   const [filtered, setFiltered] = useState([]);
@@ -55,8 +66,10 @@ export default function CommunityPage() {
   const [noteText, setNoteText] = useState('');
   const [importingConversation, setImportingConversation] = useState(false);
   const [conversationText, setConversationText] = useState('');
+  const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
+  const [pickerTarget, setPickerTarget] = useState(null);
 
-  // Inline editing state (with birthday)
+  // Inline editing
   const [editingPerson, setEditingPerson] = useState(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
@@ -272,7 +285,7 @@ export default function CommunityPage() {
 
   const stopProp = (e) => e.stopPropagation();
 
-  if (loading) return <Layout><div style={{ padding:20 }}>…</div></Layout>;
+  if (loading) return <Layout><div style={{ padding:20 }}>Loading community…</div></Layout>;
   return (
     <Layout>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
@@ -293,7 +306,7 @@ export default function CommunityPage() {
           </div>
         )}
 
-        {/* Controls – with suspicious filter toggle */}
+        {/* Controls */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
           <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)}
             style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none' }} />
@@ -304,7 +317,6 @@ export default function CommunityPage() {
             <option value="member">Member</option>
           </select>
 
-          {/* Suspicious filter toggle */}
           <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
             <input
               type="checkbox"
@@ -324,7 +336,37 @@ export default function CommunityPage() {
           <form onSubmit={addPerson} className="fiducia-card" style={{ padding: 20, marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <input placeholder="Full name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} required style={miniInput} />
             <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={miniInput} />
-            <input type="date" value={form.birthday} onChange={e => setForm({ ...form, birthday: e.target.value })} style={miniInput} />
+            {/* Birthday field - FIDUCIA style */}
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
+                <span style={{ color: '#D4AF37', marginRight: 6 }}>●</span>
+                Birthday
+                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginLeft: 6 }}>When should ARIA celebrate?</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => { setPickerTarget('add'); setShowBirthdayPicker(true); }}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(255,255,255,0.06)',
+                  background: 'rgba(20,25,40,0.6)',
+                  color: form.birthday ? '#f0f0f0' : 'rgba(255,255,255,0.3)',
+                  fontSize: 15,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  outline: 'none',
+                }}
+              >
+                {form.birthday ? new Date(form.birthday).toLocaleDateString() : 'Add birthday'}
+              </button>
+              {form.birthday && (
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
+                  Next birthday in {getNextBirthday(form.birthday)} days
+                </div>
+              )}
+            </div>
             <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={miniInput}>
               <option value="visitor">Visitor</option>
               <option value="member">Member</option>
@@ -368,7 +410,34 @@ export default function CommunityPage() {
                 <div onClick={stopProp} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <input value={editName} onChange={e => setEditName(e.target.value)} style={miniInput} />
                   <input value={editPhone} onChange={e => setEditPhone(e.target.value)} style={miniInput} />
-                  <input type="date" value={editBirthday || ''} onChange={e => setEditBirthday(e.target.value)} style={miniInput} />
+                  <div style={{ marginBottom: 8 }}>
+                    <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
+                      <span style={{ color: '#D4AF37', marginRight: 6 }}>●</span> Birthday
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => { setPickerTarget('edit'); setShowBirthdayPicker(true); }}
+                      style={{
+                        width: '100%',
+                        padding: '12px 16px',
+                        borderRadius: 10,
+                        border: '1px solid rgba(255,255,255,0.06)',
+                        background: 'rgba(20,25,40,0.6)',
+                        color: editBirthday ? '#f0f0f0' : 'rgba(255,255,255,0.3)',
+                        fontSize: 15,
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        outline: 'none',
+                      }}
+                    >
+                      {editBirthday ? new Date(editBirthday).toLocaleDateString() : 'Add birthday'}
+                    </button>
+                    {editBirthday && (
+                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
+                        Next birthday in {getNextBirthday(editBirthday)} days
+                      </div>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={(e) => { e.stopPropagation(); saveEdit(person.id); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
                     <button onClick={(e) => { e.stopPropagation(); cancelEditing(); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
@@ -394,7 +463,11 @@ export default function CommunityPage() {
                   </div>
                   {person.birthday && (
                     <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      {ICONS.calendar} Birthday: {new Date(person.birthday).toLocaleDateString()}
+                      <span style={{ color: '#D4AF37', fontSize: 10 }}>●</span>
+                      Birthday: {new Date(person.birthday).toLocaleDateString()}
+                      <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 10, marginLeft: 4 }}>
+                        (in {getNextBirthday(person.birthday)} days)
+                      </span>
                     </div>
                   )}
                   {person.last_attended_date && (
@@ -480,6 +553,23 @@ export default function CommunityPage() {
         </div>
       </div>
 
+      {/* Birthday Picker */}
+      {showBirthdayPicker && (
+        <BirthdayPicker
+          isOpen={true}
+          value={pickerTarget === 'add' ? form.birthday : editBirthday}
+          onSave={(date) => {
+            if (pickerTarget === 'add') {
+              setForm({ ...form, birthday: date });
+            } else {
+              setEditBirthday(date || '');
+            }
+            setShowBirthdayPicker(false);
+          }}
+          onCancel={() => setShowBirthdayPicker(false)}
+        />
+      )}
+
       <style jsx>{`
         .fiducia-card { background: rgba(20,25,40,0.9); border-radius: 26px; border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 0 10px rgba(212,175,55,0.03); transition: border-color 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease; padding: 24px; margin-bottom: 18px; animation: cardBreathe 20s ease-in-out infinite alternate; }
         @keyframes cardBreathe { 0% { box-shadow: inset 0 0 10px rgba(212,175,55,0.03); } 100% { box-shadow: inset 0 0 14px rgba(212,175,55,0.06); } }
@@ -501,5 +591,4 @@ const miniInput = { padding: '10px 12px', borderRadius: 10, border: '1px solid r
 const textareaStyle = { width: '100%', padding: 8, borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#fff', resize: 'vertical', outline: 'none', marginBottom: 8 };
 const actionBtnStyle = { padding: '6px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 };
 const promptBtnStyle = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#D4AF37', borderRadius: 8, padding: '6px 12px', fontSize: 12, cursor: 'pointer' };
-const selectBar = { position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', background: 'rgba(10,15,26,0.9)', backdropFilter: 'blur(20px)', borderRadius: 20, padding: '12px 24px', display: 'flex', gap: 16, zIndex: 1001, border: '1px solid rgba(255,255,255,0.06)' };
-const barBtn = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 10, padding: '8px 16px', fontSize: 13, cursor: 'pointer', backdropFilter: 'blur(10px)' };
+const selectBar = { position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', backgro
