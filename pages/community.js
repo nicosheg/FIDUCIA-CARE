@@ -41,6 +41,7 @@ function isSuspicious(name) {
   return false;
 }
 
+// Helper to calculate next birthday
 function getNextBirthday(birthday) {
   if (!birthday) return null;
   const today = new Date();
