@@ -1,5 +1,37 @@
-// components/BirthdayPicker.js – FIDUCIA Birthday Selector
-import { useState, useEffect, useRef } from 'react';
+// components/BirthdayPicker.js – FIDUCIA Birthday Selector (No Emojis)
+import { useState, useEffect } from 'react';
+
+// ── Glowing SVG Icons ──
+const GlowBirthday = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+    <circle cx="12" cy="12" r="10" stroke="#D4AF37" strokeWidth="1.5" opacity="0.3" />
+    <circle cx="12" cy="12" r="7" stroke="#D4AF37" strokeWidth="1" opacity="0.5" />
+    <path d="M12 4V7M12 17V20M5 12H8M16 12H19M6.5 6.5L8.5 8.5M15.5 15.5L17.5 17.5M6.5 17.5L8.5 15.5M15.5 8.5L17.5 6.5" stroke="#D4AF37" strokeWidth="1.2" opacity="0.7" />
+    <circle cx="9.5" cy="9.5" r="1" fill="#D4AF37" opacity="0.4" />
+    <circle cx="14.5" cy="9.5" r="1" fill="#D4AF37" opacity="0.4" />
+    <path d="M9.5 14C10 15 11 15.5 12 15.5C13 15.5 14 15 14.5 14" stroke="#D4AF37" strokeWidth="1.2" opacity="0.6" />
+  </svg>
+);
+
+const GlowCheck = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <circle cx="12" cy="12" r="10" fill="rgba(52,211,153,0.1)" stroke="#34D399" strokeWidth="1.5" />
+    <path d="M8 12L11 15L16 9" stroke="#34D399" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
+
+const GlowClose = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="2">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+
+const GlowArrow = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.3)" strokeWidth="2">
+    <polyline points="6 9 12 15 18 9" />
+  </svg>
+);
 
 // ── Helpers ──
 function getDaysInMonth(month, year) {
@@ -42,11 +74,10 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   label: formatMonth(i + 1),
 }));
 
-// ── Year selector with decades ──
+// ── Year Selector ──
 function YearSelector({ value, onChange, onClose }) {
   const [decade, setDecade] = useState(Math.floor((value || 2000) / 10) * 10);
   const years = Array.from({ length: 30 }, (_, i) => decade + i - 10);
-
   const decades = [1900, 1950, 1980, 1990, 2000, 2010, 2020];
 
   return (
@@ -92,13 +123,11 @@ export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOp
   const [showYearPicker, setShowYearPicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(value || null);
 
-  // Initialize temp date from value
   useEffect(() => {
     if (value) {
       const d = new Date(value);
       setTempDate({ day: d.getDate(), month: d.getMonth() + 1, year: d.getFullYear() });
     } else {
-      const today = new Date();
       setTempDate({ day: 1, month: 1, year: 2000 });
     }
   }, [value]);
@@ -142,18 +171,26 @@ export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOp
       <div style={overlay} onClick={onCancel} />
       <div style={sheet}>
         <div style={sheetHeader}>
-          <div style={sheetTitle}>🎂 When is their birthday?</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <GlowBirthday />
+            <div style={sheetTitle}>When is their birthday?</div>
+          </div>
           <div style={sheetSubtitle}>ARIA will remember and celebrate with them.</div>
-          <button onClick={onCancel} style={closeBtn}>✕</button>
+          <button onClick={onCancel} style={closeBtn}>
+            <GlowClose />
+          </button>
         </div>
 
-        {/* Quick preview */}
+        {/* Preview */}
         {formattedDate && (
           <div style={previewContainer}>
             <div style={previewDate}>{formattedDate}</div>
             <div style={previewAge}>{age !== null && `${age} years old`}</div>
             {nextBirthday !== null && nextBirthday >= 0 && (
-              <div style={previewNext}>🎂 Next birthday in {nextBirthday} days</div>
+              <div style={previewNext}>
+                <span style={{ color: '#D4AF37', marginRight: 6 }}>●</span>
+                Next birthday in {nextBirthday} days
+              </div>
             )}
           </div>
         )}
@@ -210,7 +247,7 @@ export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOp
               style={yearTrigger}
             >
               <span style={{ fontSize: 18, fontWeight: 600, color: '#D4AF37' }}>{tempDate.year}</span>
-              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>▼</span>
+              <GlowArrow />
             </button>
             {showYearPicker && (
               <YearSelector
@@ -226,13 +263,18 @@ export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOp
         <div style={actions}>
           <button onClick={handleClear} style={clearBtn}>Clear</button>
           <button onClick={onCancel} style={cancelBtn}>Cancel</button>
-          <button onClick={handleSet} style={setBtn}>Set Birthday</button>
+          <button onClick={handleSet} style={setBtn}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+              <GlowCheck />
+              Set Birthday
+            </span>
+          </button>
         </div>
 
-        {/* ARIA confirmation after set */}
+        {/* ARIA confirmation */}
         {selectedDate && (
           <div style={ariaAck}>
-            <span style={{ color: '#D4AF37', marginRight: 6 }}>✦</span>
+            <span style={{ color: '#D4AF37', marginRight: 8 }}>●</span>
             ARIA will remember this birthday.
           </div>
         )}
@@ -281,12 +323,12 @@ const sheetTitle = {
   fontSize: 20,
   fontWeight: 600,
   color: '#f0f0f0',
-  marginBottom: 4,
 };
 
 const sheetSubtitle = {
   fontSize: 14,
   color: 'rgba(255,255,255,0.4)',
+  marginTop: 2,
 };
 
 const closeBtn = {
@@ -295,9 +337,7 @@ const closeBtn = {
   right: 0,
   background: 'rgba(255,255,255,0.05)',
   border: 'none',
-  color: 'rgba(255,255,255,0.3)',
-  fontSize: 18,
-  padding: '4px 8px',
+  padding: '6px 8px',
   borderRadius: 8,
   cursor: 'pointer',
 };
@@ -325,7 +365,7 @@ const previewAge = {
 
 const previewNext = {
   fontSize: 14,
-  color: '#D4AF37',
+  color: 'rgba(255,255,255,0.5)',
   marginTop: 4,
 };
 
