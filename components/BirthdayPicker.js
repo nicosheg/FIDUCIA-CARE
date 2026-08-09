@@ -1,4 +1,4 @@
-// components/BirthdayPicker.js – FIDUCIA Birthday Selector (No Emojis)
+// components/BirthdayPicker.js – FIDUCIA Birthday Selector
 import { useState, useEffect } from 'react';
 
 // ── Glowing SVG Icons ──
@@ -118,7 +118,7 @@ function YearSelector({ value, onChange, onClose }) {
 }
 
 // ── Main Component ──
-export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOpen }) {
+export default function BirthdayPicker({ value, onSave, onCancel, isOpen }) {
   const [tempDate, setTempDate] = useState({ day: 1, month: 1, year: 2000 });
   const [showYearPicker, setShowYearPicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(value || null);
@@ -181,7 +181,6 @@ export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOp
           </button>
         </div>
 
-        {/* Preview */}
         {formattedDate && (
           <div style={previewContainer}>
             <div style={previewDate}>{formattedDate}</div>
@@ -195,9 +194,7 @@ export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOp
           </div>
         )}
 
-        {/* Selectors */}
         <div style={pickerContainer}>
-          {/* Day */}
           <div style={pickerColumn}>
             <div style={pickerLabel}>DAY</div>
             <div style={pickerItems}>
@@ -218,7 +215,6 @@ export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOp
             </div>
           </div>
 
-          {/* Month */}
           <div style={pickerColumn}>
             <div style={pickerLabel}>MONTH</div>
             <div style={pickerItems}>
@@ -239,7 +235,6 @@ export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOp
             </div>
           </div>
 
-          {/* Year */}
           <div style={pickerColumn}>
             <div style={pickerLabel}>YEAR</div>
             <button
@@ -259,7 +254,6 @@ export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOp
           </div>
         </div>
 
-        {/* Actions */}
         <div style={actions}>
           <button onClick={handleClear} style={clearBtn}>Clear</button>
           <button onClick={onCancel} style={cancelBtn}>Cancel</button>
@@ -271,7 +265,6 @@ export default function BirthdayPicker({ value, onChange, onSave, onCancel, isOp
           </button>
         </div>
 
-        {/* ARIA confirmation */}
         {selectedDate && (
           <div style={ariaAck}>
             <span style={{ color: '#D4AF37', marginRight: 8 }}>●</span>
