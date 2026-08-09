@@ -7,7 +7,6 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     const includeDeleted = req.query.include_deleted === 'true';
 
-    // Base query with computed columns
     const baseQuery = `
       SELECT p.*,
              (SELECT MAX(ar.attendance_date) FROM attendance_records ar
@@ -19,7 +18,6 @@ export default async function handler(req, res) {
       WHERE p.organization_id = $1
     `;
 
-    // Append the deleted clause only if we're not including deleted
     const deletedClause = " AND p.status != 'deleted'";
     const finalQuery = includeDeleted
       ? baseQuery + ' ORDER BY p.created_at DESC'
@@ -36,14 +34,14 @@ export default async function handler(req, res) {
 
   // ---------- POST – add a new person ----------
   if (req.method === 'POST') {
-    const { first_name, last_name, phone, email, type, organization_id } = req.body;
+    const { first_name, last_name, phone, email, type, organization_id, birthday } = req.body;
     if (!first_name) return res.status(400).json({ error: 'first_name is required' });
 
     try {
       const result = await pool.query(
-        `INSERT INTO people (organization_id, first_name, last_name, phone, email, type)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [organization_id || orgId, first_name, last_name || '', phone || '', email || '', type || 'visitor']
+        `INSERT INTO people (organization_id, first_name, last_name, phone, email, type, birthday)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [organization_id || orgId, first_name, last_name || '', phone || '', email || '', type || 'visitor', birthday || null]
       );
       return res.status(200).json(result.rows[0]);
     } catch (err) {
@@ -54,14 +52,14 @@ export default async function handler(req, res) {
 
   // ---------- PUT – update an existing person ----------
   if (req.method === 'PUT') {
-    const { id, first_name, last_name, phone, type } = req.body;
+    const { id, first_name, last_name, phone, type, birthday } = req.body;
     if (!id) return res.status(400).json({ error: 'id is required' });
 
     try {
       const result = await pool.query(
-        `UPDATE people SET first_name=$1, last_name=$2, phone=$3, type=$4, updated_at=now()
-         WHERE id=$5 AND organization_id=$6 RETURNING *`,
-        [first_name, last_name || '', phone || '', type || 'visitor', id, orgId]
+        `UPDATE people SET first_name=$1, last_name=$2, phone=$3, type=$4, birthday=$5, updated_at=now()
+         WHERE id=$6 AND organization_id=$7 RETURNING *`,
+        [first_name, last_name || '', phone || '', type || 'visitor', birthday || null, id, orgId]
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'Person not found' });
       return res.status(200).json(result.rows[0]);
@@ -72,4 +70,4 @@ export default async function handler(req, res) {
   }
 
   res.status(405).end();
-      }
+        }
