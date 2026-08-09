@@ -3,9 +3,10 @@ import pool from '../../lib/db';
 export default async function handler(req, res) {
   const orgId = req.query.organization_id || req.body?.organization_id || 'demo-org';
 
-  // POST: ARIA Scan – optionally update or regenerate care items
+  // POST: ARIA Scan – trigger intelligence scan
   if (req.method === 'POST') {
     console.log(`ARIA scan triggered for org: ${orgId}`);
+    // In future, this could call a more sophisticated intelligence layer
     return res.status(200).json({ message: 'ARIA scan complete.' });
   }
 
@@ -29,15 +30,14 @@ export default async function handler(req, res) {
         LIMIT 20
       `, [orgId]);
 
-      // 2. Birthdays this week – FIXED: use metadata->>'birthday'
+      // 2. Birthdays this week (using the new birthday column)
       const birthday = await pool.query(`
-        SELECT id, first_name, phone, metadata->>'birthday' as birthday
+        SELECT id, first_name, phone, birthday
         FROM people
-        WHERE metadata->>'birthday' IS NOT NULL
-          AND EXTRACT(MONTH FROM TO_DATE(metadata->>'birthday', 'YYYY-MM-DD')) = EXTRACT(MONTH FROM CURRENT_DATE)
-          AND EXTRACT(DAY FROM TO_DATE(metadata->>'birthday', 'YYYY-MM-DD')) 
-              BETWEEN EXTRACT(DAY FROM CURRENT_DATE) 
-              AND EXTRACT(DAY FROM CURRENT_DATE) + 7
+        WHERE birthday IS NOT NULL
+          AND EXTRACT(MONTH FROM birthday) = EXTRACT(MONTH FROM CURRENT_DATE)
+          AND EXTRACT(DAY FROM birthday) BETWEEN EXTRACT(DAY FROM CURRENT_DATE) 
+                                            AND EXTRACT(DAY FROM CURRENT_DATE) + 7
       `);
 
       // 3. Open prayer requests
@@ -51,6 +51,7 @@ export default async function handler(req, res) {
 
       // Build ARIA suggestions
       const items = [];
+
       notContacted.rows.forEach(p => {
         items.push({
           person_id: p.id,
@@ -60,6 +61,7 @@ export default async function handler(req, res) {
           text: `${p.first_name} hasn't been contacted recently. ARIA suggests a warm check-in.`
         });
       });
+
       birthday.rows.forEach(p => {
         items.push({
           person_id: p.id,
@@ -69,6 +71,7 @@ export default async function handler(req, res) {
           text: `${p.first_name}'s birthday is coming up. ARIA recommends sending a heartfelt greeting.`
         });
       });
+
       prayers.rows.forEach(p => {
         items.push({
           person_id: p.id,
@@ -79,17 +82,17 @@ export default async function handler(req, res) {
         });
       });
 
-      // Sort by priority
+      // Sort by priority (high → medium → low)
       const priorityOrder = { high: 1, medium: 2, low: 3 };
       items.sort((a, b) => (priorityOrder[a.priority] || 4) - (priorityOrder[b.priority] || 4));
 
       res.status(200).json(items);
     } catch (err) {
-      console.error(err);
+      console.error('Care Queue error:', err);
       res.status(500).json({ error: err.message });
     }
   } else {
     res.setHeader('Allow', ['GET', 'POST']);
     res.status(405).end(`Method ${req.method} Not Allowed`);
   }
-            }
+          }
