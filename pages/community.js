@@ -15,7 +15,6 @@ const ICONS = {
   check: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34D399" strokeWidth="2"><path d="M20 6L9 17l-5-5" /></svg>),
   trash: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>),
   close: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>),
-  // Note prompt icons
   prayer: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><path d="M17 14V3a1 1 0 00-1-1H8a1 1 0 00-1 1v11l4 4 6-4z" /><path d="M12 22V8" /></svg>),
   heart: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" /></svg>),
   smile: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg>),
@@ -25,11 +24,28 @@ const ICONS = {
   other: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>),
 };
 
+// ── Suspicious name detection (for cleanup) ──
+const SUSPICIOUS_PATTERNS = [
+  /\*\*/, /->/, /Line \d+/, /Let's/, /re-read/, /carefully/,
+  /illegible/, /faint/, /<think>/, /the user wants/,
+  /analyze the image/, /I will/, /^[0-9]+\./, /^[*\-]/
+];
+
+function isSuspicious(name) {
+  if (!name) return false;
+  if (name.length > 60) return true;
+  for (const pat of SUSPICIOUS_PATTERNS) {
+    if (pat.test(name)) return true;
+  }
+  return false;
+}
+
 export default function CommunityPage() {
   const [people, setPeople] = useState([]);
   const [filtered, setFiltered] = useState([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [showSuspicious, setShowSuspicious] = useState(false);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -57,9 +73,11 @@ export default function CommunityPage() {
     if (Array.isArray(data)) { setPeople(data); setLoading(false); }
   };
 
+  // Filter effect
   useEffect(() => {
     let result = [...people];
     if (roleFilter !== 'all') result = result.filter(p => p.type === roleFilter);
+    if (showSuspicious) result = result.filter(p => isSuspicious(p.first_name));
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(p =>
@@ -67,7 +85,7 @@ export default function CommunityPage() {
       );
     }
     setFiltered(result);
-  }, [people, search, roleFilter]);
+  }, [people, search, roleFilter, showSuspicious]);
 
   // ─── Long‑press → select mode ───
   const onPointerDown = useCallback((personId) => {
@@ -102,13 +120,29 @@ export default function CommunityPage() {
     setSelectedIds(new Set());
   };
 
+  // ─── Bulk Delete (instant) ───
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Remove ${selectedIds.size} selected people?`)) return;
-    for (const id of selectedIds) {
-      await fetch('/api/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    if (!confirm(`Remove ${selectedIds.size} selected people? This also removes their attendance, timeline, and care records.`)) return;
+
+    const ids = Array.from(selectedIds);
+    try {
+      const res = await fetch('/api/people/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPeople(prev => prev.filter(p => !ids.includes(p.id)));
+        setMessage(`Deleted ${data.deleted} people.`);
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        setMessage('Error: ' + (data.error || 'Delete failed'));
+      }
+    } catch (err) {
+      setMessage('Error deleting.');
     }
-    setPeople(prev => prev.filter(p => !selectedIds.has(p.id)));
     cancelSelectMode();
   };
 
@@ -196,11 +230,27 @@ export default function CommunityPage() {
     setTimeout(() => setMessage(''), 3000);
   };
 
+  // ─── Single delete (instant) ───
   const handleDelete = async (personId, e) => {
     if (e) e.stopPropagation();
-    if (!confirm('Remove this person?')) return;
-    await fetch('/api/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: personId }) });
-    setPeople(prev => prev.filter(p => p.id !== personId));
+    if (!confirm('Remove this person? This also removes their attendance, timeline, and care records.')) return;
+    try {
+      const res = await fetch('/api/people/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: personId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPeople(prev => prev.filter(p => p.id !== personId));
+        setMessage('Deleted');
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        setMessage('Error: ' + (data.error || 'Delete failed'));
+      }
+    } catch (err) {
+      setMessage('Error deleting.');
+    }
   };
 
   const stopProp = (e) => e.stopPropagation();
@@ -226,7 +276,7 @@ export default function CommunityPage() {
           </div>
         )}
 
-        {/* Controls – NO select button here */}
+        {/* Controls – with suspicious filter toggle */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
           <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)}
             style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none' }} />
@@ -236,6 +286,20 @@ export default function CommunityPage() {
             <option value="visitor">Visitor</option>
             <option value="member">Member</option>
           </select>
+
+          {/* NEW: Suspicious filter toggle */}
+          <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={showSuspicious}
+              onChange={() => setShowSuspicious(!showSuspicious)}
+            />
+            Show suspicious/corrupted only
+            <span style={{ fontSize: 11, color: '#EF4444' }}>
+              ({people.filter(p => isSuspicious(p.first_name)).length})
+            </span>
+          </label>
+
           <button onClick={() => setShowAddForm(!showAddForm)} className="fiducia-button fiducia-button-primary">Add Person</button>
         </div>
 
@@ -298,9 +362,16 @@ export default function CommunityPage() {
                   {/* Card header */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
-                    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      {ICONS.visitor} {person.type || 'visitor'}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {ICONS.visitor} {person.type || 'visitor'}
+                      </span>
+                      {isSuspicious(person.first_name) && (
+                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 12, background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>
+                          ⚠️
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
                     {ICONS.phone} {person.phone || 'No phone'}
@@ -390,6 +461,20 @@ export default function CommunityPage() {
           ))}
         </div>
       </div>
+
+      {/* Styles (unchanged) */}
+      <style jsx>{`
+        .fiducia-card { background: rgba(20,25,40,0.9); border-radius: 26px; border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 0 10px rgba(212,175,55,0.03); transition: border-color 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease; padding: 24px; margin-bottom: 18px; animation: cardBreathe 20s ease-in-out infinite alternate; }
+        @keyframes cardBreathe { 0% { box-shadow: inset 0 0 10px rgba(212,175,55,0.03); } 100% { box-shadow: inset 0 0 14px rgba(212,175,55,0.06); } }
+        .fiducia-button { padding: 12px 24px; border-radius: 30px; font-weight: 500; font-size: 15px; cursor: pointer; transition: background 0.2s, box-shadow 0.2s, transform 0.1s; display: inline-block; text-decoration: none; text-align: center; user-select: none; border: 1px solid transparent; }
+        .fiducia-button-primary { background: rgba(212,175,55,0.1); border-color: rgba(212,175,55,0.2); color: #D4AF37; }
+        .fiducia-button-primary:active { background: rgba(212,175,55,0.2); box-shadow: 0 0 18px rgba(212,175,55,0.12); transform: scale(0.98); }
+        .fiducia-button-secondary { background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.2); color: #60A5FA; }
+        .fiducia-button-secondary:active { background: rgba(59,130,246,0.2); box-shadow: 0 0 18px rgba(59,130,246,0.12); transform: scale(0.98); }
+        .fiducia-button-ghost { background: transparent; border-color: rgba(255,255,255,0.1); color: rgba(255,255,255,0.6); }
+        .fiducia-button-ghost:active { background: rgba(255,255,255,0.05); box-shadow: 0 0 10px rgba(255,255,255,0.05); transform: scale(0.98); }
+        .fiducia-card:active { border-color: rgba(212,175,55,0.25); box-shadow: inset 0 0 15px rgba(212,175,55,0.08); transform: scale(0.99); }
+      `}</style>
     </Layout>
   );
 }
