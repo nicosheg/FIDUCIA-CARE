@@ -5,7 +5,7 @@ import BirthdayPicker from '../components/BirthdayPicker';
 
 const ORG_ID = 'demo-org';
 
-// ── Glowing SVG icons ──
+// ── Glowing SVG icons (no emojis) ──
 const ICONS = {
   visitor: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 4-7 8-7s8 3 8 7" /></svg>),
   phone: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12" y2="18.01" stroke="currentColor" strokeWidth="3" /></svg>),
@@ -126,9 +126,103 @@ export default function CommunityPage() {
   const selectAll = () => setSelectedIds(new Set(filtered.map(p => p.id)));
   const cancelSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
 
+  // ========== CREATE ==========
+  const addPerson = async e => {
+    e.preventDefault();
+    if (!form.full_name.trim()) return;
+    try {
+      const res = await fetch('/api/people', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name: form.full_name.trim(),
+          phone: form.phone,
+          type: form.type,
+          birthday: form.birthday || null,
+          // last_name is intentionally omitted – we use single Full Name
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.id) {
+        setPeople(prev => [data, ...prev]);
+        setForm({ full_name: '', phone: '', type: 'visitor', birthday: '' });
+        setShowAddForm(false);
+        setMessage('Person added');
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        setMessage('Error: ' + (data.error || 'Could not add'));
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch (err) {
+      setMessage('Error adding.');
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
+  // ========== UPDATE ==========
+  const saveEdit = async (personId) => {
+    if (!editName.trim()) return;
+    try {
+      const res = await fetch('/api/people', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: personId,
+          first_name: editName.trim(),
+          phone: editPhone,
+          type: people.find(p => p.id === personId)?.type || 'visitor',
+          birthday: editBirthday || null,
+          // last_name is intentionally omitted – we preserve existing value
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.id) {
+        setPeople(prev => prev.map(p => p.id === personId ? data : p));
+        setMessage('Updated');
+        setTimeout(() => setMessage(''), 3000);
+        setEditingPerson(null);
+        cancelSelectMode();
+      } else {
+        setMessage('Error: ' + (data.error || 'Update failed'));
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch (err) {
+      setMessage('Error updating.');
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
+  // ========== DELETE (single) ==========
+  const handleDelete = async (personId, e) => {
+    if (e) e.stopPropagation();
+    if (!confirm('Remove this person? This also removes their attendance, timeline, and care records.')) return;
+
+    try {
+      const res = await fetch('/api/people/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: personId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.deleted > 0) {
+        setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id)));
+        setMessage(`Deleted ${data.deleted} person.`);
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        setMessage('Error: ' + (data.error || 'Delete failed'));
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch (err) {
+      setMessage('Error deleting.');
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
+  // ========== BULK DELETE ==========
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`Remove ${selectedIds.size} selected people? This also removes their attendance, timeline, and care records.`)) return;
+
     const ids = Array.from(selectedIds);
     try {
       const res = await fetch('/api/people/delete', {
@@ -137,78 +231,23 @@ export default function CommunityPage() {
         body: JSON.stringify({ ids }),
       });
       const data = await res.json();
-      if (data.success) {
-        setPeople(prev => prev.filter(p => !ids.includes(p.id)));
-        setMessage(`Deleted ${data.deleted} people.`);
+      if (res.ok && data.success && data.deleted > 0) {
+        setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id)));
+        const notFoundMsg = data.not_found_ids.length > 0 ? ` ${data.not_found_ids.length} not found.` : '';
+        setMessage(`Deleted ${data.deleted} people.${notFoundMsg}`);
         setTimeout(() => setMessage(''), 3000);
       } else {
         setMessage('Error: ' + (data.error || 'Delete failed'));
+        setTimeout(() => setMessage(''), 3000);
       }
     } catch (err) {
       setMessage('Error deleting.');
-    }
-    cancelSelectMode();
-  };
-
-  const startEditing = () => {
-    if (selectedIds.size !== 1) return;
-    const id = selectedIds.values().next().value;
-    const person = people.find(p => p.id === id);
-    if (person) {
-      setEditName(person.first_name || '');
-      setEditPhone(person.phone || '');
-      setEditBirthday(person.birthday || '');
-      setEditingPerson(id);
-    }
-  };
-
-  const saveEdit = async (personId) => {
-    if (!editName.trim()) return;
-    await fetch('/api/people', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: personId,
-        first_name: editName.trim(),
-        last_name: '',
-        phone: editPhone,
-        type: people.find(p => p.id === personId)?.type || 'visitor',
-        birthday: editBirthday || null,
-        organization_id: ORG_ID,
-      }),
-    });
-    setPeople(prev => prev.map(p => p.id === personId ? { ...p, first_name: editName.trim(), phone: editPhone, birthday: editBirthday || null } : p));
-    setEditingPerson(null);
-    cancelSelectMode();
-    setMessage('Updated');
-    setTimeout(() => setMessage(''), 3000);
-  };
-
-  const cancelEditing = () => setEditingPerson(null);
-
-  const addPerson = async e => {
-    e.preventDefault();
-    if (!form.full_name.trim()) return;
-    const res = await fetch('/api/people', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        first_name: form.full_name.trim(),
-        last_name: '',
-        phone: form.phone,
-        organization_id: ORG_ID,
-        type: form.type,
-        birthday: form.birthday || null,
-      }),
-    });
-    const data = await res.json();
-    if (data.id) {
-      setPeople(prev => [data, ...prev]);
-      setForm({ full_name: '', phone: '', type: 'visitor', birthday: '' });
-      setShowAddForm(false);
-      setMessage('Person added');
       setTimeout(() => setMessage(''), 3000);
-    } else setMessage('Error: ' + (data.error || 'Could not add'));
+    }
+    cancelSelectMode();
   };
 
+  // ========== OTHER ACTIONS ==========
   const generateDraft = async (personId) => {
     const res = await fetch('/api/presence/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: personId }) });
     const data = await res.json();
@@ -248,28 +287,6 @@ export default function CommunityPage() {
     setTimeout(() => setMessage(''), 3000);
   };
 
-  const handleDelete = async (personId, e) => {
-    if (e) e.stopPropagation();
-    if (!confirm('Remove this person? This also removes their attendance, timeline, and care records.')) return;
-    try {
-      const res = await fetch('/api/people/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: personId }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setPeople(prev => prev.filter(p => p.id !== personId));
-        setMessage('Deleted');
-        setTimeout(() => setMessage(''), 3000);
-      } else {
-        setMessage('Error: ' + (data.error || 'Delete failed'));
-      }
-    } catch (err) {
-      setMessage('Error deleting.');
-    }
-  };
-
   const stopProp = (e) => e.stopPropagation();
 
   if (loading) return <Layout><div style={{ padding:20 }}>Loading community…</div></Layout>;
@@ -285,7 +302,16 @@ export default function CommunityPage() {
             <span style={{ color: '#f0f0f0', fontWeight: 600 }}>{selectedIds.size} selected</span>
             <button onClick={selectAll} style={barBtn}>Select All</button>
             {selectedIds.size === 1 && (
-              <button onClick={startEditing} style={barBtn}>Edit</button>
+              <button onClick={() => {
+                const id = selectedIds.values().next().value;
+                const person = people.find(p => p.id === id);
+                if (person) {
+                  setEditName(person.first_name || '');
+                  setEditPhone(person.phone || '');
+                  setEditBirthday(person.birthday || '');
+                  setEditingPerson(id);
+                }
+              }} style={barBtn}>Edit</button>
             )}
             <button onClick={bulkDelete} style={{ ...barBtn, borderColor: '#EF4444', color: '#EF4444' }}>Delete</button>
             <button onClick={cancelSelectMode} style={barBtn}>Cancel</button>
@@ -315,7 +341,7 @@ export default function CommunityPage() {
 
         {showAddForm && (
           <form onSubmit={addPerson} className="fiducia-card" style={{ padding: 20, marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <input placeholder="Full name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} required style={miniInput} />
+            <input placeholder="Full Name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} required style={miniInput} />
             <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={miniInput} />
             <div style={{ marginBottom: 8 }}>
               <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
@@ -387,8 +413,8 @@ export default function CommunityPage() {
 
               {editingPerson === person.id ? (
                 <div onClick={stopProp} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <input value={editName} onChange={e => setEditName(e.target.value)} style={miniInput} />
-                  <input value={editPhone} onChange={e => setEditPhone(e.target.value)} style={miniInput} />
+                  <input value={editName} onChange={e => setEditName(e.target.value)} style={miniInput} placeholder="Full Name" />
+                  <input value={editPhone} onChange={e => setEditPhone(e.target.value)} style={miniInput} placeholder="Phone" />
                   <div style={{ marginBottom: 8 }}>
                     <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
                       <span style={{ color: '#D4AF37', marginRight: 6 }}>●</span> Birthday
@@ -419,7 +445,7 @@ export default function CommunityPage() {
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={(e) => { e.stopPropagation(); saveEdit(person.id); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
-                    <button onClick={(e) => { e.stopPropagation(); cancelEditing(); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
+                    <button onClick={(e) => { e.stopPropagation(); setEditingPerson(null); cancelSelectMode(); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
                   </div>
                 </div>
               ) : (
