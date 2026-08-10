@@ -1,4 +1,5 @@
-import pool from '../../../lib/db';
+// pages/api/people/delete.js
+import pool from '../../lib/db';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -6,8 +7,8 @@ export default async function handler(req, res) {
   }
 
   const { id, ids } = req.body;
+  const orgId = req.query.organization_id || req.body?.organization_id || 'demo-org';
 
-  // Support both single delete (id) and bulk delete (ids array)
   let deleteIds = [];
   if (ids && Array.isArray(ids) && ids.length > 0) {
     deleteIds = ids;
@@ -21,48 +22,80 @@ export default async function handler(req, res) {
   try {
     await client.query('BEGIN');
 
-    // 1. Delete attendance records (cascade manually if FK not set)
-    await client.query(
-      `DELETE FROM attendance_records WHERE member_id = ANY($1)`,
-      [deleteIds]
+    // 1. Verify which requested IDs actually exist and belong to the organization
+    const existingRes = await client.query(
+      `SELECT id FROM people WHERE organization_id = $1 AND id = ANY($2)`,
+      [orgId, deleteIds]
     );
+    const existingIds = existingRes.rows.map(row => row.id);
+    const notFoundIds = deleteIds.filter(id => !existingIds.includes(id));
 
-    // 2. Delete timeline events
-    await client.query(
-      `DELETE FROM timeline_events WHERE person_id = ANY($1)`,
-      [deleteIds]
-    );
+    if (existingIds.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        success: false,
+        error: 'No matching people found',
+        requested: deleteIds.length,
+        deleted: 0,
+        deleted_ids: [],
+        not_found_ids: deleteIds,
+      });
+    }
 
-    // 3. Delete group memberships
-    await client.query(
-      `DELETE FROM group_memberships WHERE person_id = ANY($1)`,
-      [deleteIds]
-    );
+    // 2. Delete dependent records
+    await client.query(`DELETE FROM attendance_records WHERE member_id = ANY($1)`, [existingIds]);
+    await client.query(`DELETE FROM timeline_events WHERE person_id = ANY($1)`, [existingIds]);
+    await client.query(`DELETE FROM group_memberships WHERE person_id = ANY($1)`, [existingIds]);
+    await client.query(`DELETE FROM care_queue WHERE person_id = ANY($1)`, [existingIds]);
 
-    // 4. Delete care queue items
-    await client.query(
-      `DELETE FROM care_queue WHERE person_id = ANY($1)`,
-      [deleteIds]
+    // 3. Check if usher_activity exists and delete if present
+    const tableCheck = await client.query(
+      `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'usher_activity')`
     );
+    if (tableCheck.rows[0].exists) {
+      await client.query(`DELETE FROM usher_activity WHERE person_id = ANY($1)`, [existingIds]);
+    }
 
-    // 5. Finally, delete the people
-    const result = await client.query(
-      `DELETE FROM people WHERE id = ANY($1) RETURNING id`,
-      [deleteIds]
+    // 4. Delete people with organization scope and RETURNING id
+    const deleteResult = await client.query(
+      `DELETE FROM people WHERE organization_id = $1 AND id = ANY($2) RETURNING id`,
+      [orgId, existingIds]
     );
+    const deletedIds = deleteResult.rows.map(row => row.id);
+
+    if (deletedIds.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        success: false,
+        error: 'Deletion failed – no records removed',
+        requested: deleteIds.length,
+        deleted: 0,
+        deleted_ids: [],
+        not_found_ids: deleteIds,
+      });
+    }
 
     await client.query('COMMIT');
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      deleted: result.rows.length,
-      ids: result.rows.map(r => r.id),
+      requested: deleteIds.length,
+      deleted: deletedIds.length,
+      deleted_ids: deletedIds,
+      not_found_ids: notFoundIds,
     });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Delete error:', err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({
+      success: false,
+      error: err.message || 'Internal server error',
+      requested: deleteIds.length,
+      deleted: 0,
+      deleted_ids: [],
+      not_found_ids: deleteIds,
+    });
   } finally {
     client.release();
   }
-      }
+}
