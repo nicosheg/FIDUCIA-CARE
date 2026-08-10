@@ -1,5 +1,29 @@
 // pages/api/people/delete.js
-import pool from '../../../lib/db';
+import pool from '../../lib/db';
+
+/**
+ * Helper to delete from a table only if it exists.
+ * Hard-coded table/column names – safe against SQL injection.
+ */
+async function deleteFromTableIfExists(client, tableName, columnName, ids) {
+  // Check if table exists in public schema
+  const check = await client.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = $1
+     )`,
+    [tableName]
+  );
+  if (!check.rows[0].exists) {
+    console.warn(`DELETE: Table "${tableName}" does not exist – skipping.`);
+    return;
+  }
+  // Table exists → delete
+  await client.query(
+    `DELETE FROM ${tableName} WHERE ${columnName} = ANY($1)`,
+    [ids]
+  );
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -22,7 +46,7 @@ export default async function handler(req, res) {
   try {
     await client.query('BEGIN');
 
-    // 1. Verify which requested IDs actually exist and belong to the organization
+    // 1. Verify existing IDs in this organization
     const existingRes = await client.query(
       `SELECT id FROM people WHERE organization_id = $1 AND id = ANY($2)`,
       [orgId, deleteIds]
@@ -42,21 +66,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2. Delete dependent records
-    await client.query(`DELETE FROM attendance_records WHERE member_id = ANY($1)`, [existingIds]);
-    await client.query(`DELETE FROM timeline_events WHERE person_id = ANY($1)`, [existingIds]);
-    await client.query(`DELETE FROM group_memberships WHERE person_id = ANY($1)`, [existingIds]);
-    await client.query(`DELETE FROM care_queue WHERE person_id = ANY($1)`, [existingIds]);
+    // 2. Delete from dependent tables – only if they exist
+    await deleteFromTableIfExists(client, 'attendance_records', 'member_id', existingIds);
+    await deleteFromTableIfExists(client, 'timeline_events', 'person_id', existingIds);
+    await deleteFromTableIfExists(client, 'group_memberships', 'person_id', existingIds);
+    await deleteFromTableIfExists(client, 'care_queue', 'person_id', existingIds);
+    await deleteFromTableIfExists(client, 'usher_activity', 'person_id', existingIds);
 
-    // 3. Check if usher_activity exists and delete if present
-    const tableCheck = await client.query(
-      `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'usher_activity')`
-    );
-    if (tableCheck.rows[0].exists) {
-      await client.query(`DELETE FROM usher_activity WHERE person_id = ANY($1)`, [existingIds]);
-    }
-
-    // 4. Delete people with organization scope and RETURNING id
+    // 3. Delete people (this table definitely exists)
     const deleteResult = await client.query(
       `DELETE FROM people WHERE organization_id = $1 AND id = ANY($2) RETURNING id`,
       [orgId, existingIds]
