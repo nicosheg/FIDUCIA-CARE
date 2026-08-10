@@ -1,5 +1,5 @@
 // pages/api/people/delete.js
-import pool from '../../../../lib/db';  // ✅ Fixed path
+import pool from '../../../lib/db';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -98,4 +98,4 @@ export default async function handler(req, res) {
   } finally {
     client.release();
   }
-          }
+}
