@@ -1,5 +1,5 @@
 // pages/api/people/delete.js
-import pool from '../../lib/db';
+import pool from '../../../lib/db';
 
 /**
  * Helper to delete from a table only if it exists.
