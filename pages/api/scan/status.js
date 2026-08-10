@@ -1,11 +1,9 @@
-// pages/api/scan/status.js – Safe parsing of scan_jobs.result
-
+// pages/api/scan/status.js
 import pool from '../../../lib/db';
-import { INTERNAL_STATES, ariaMessageForState } from '../../../lib/scanState';
 
 function safeParseResult(result) {
   if (result === null || result === undefined) return null;
-  if (typeof result === 'object') return result; // already parsed
+  if (typeof result === 'object') return result;
   if (typeof result === 'string') {
     try { return JSON.parse(result); } catch { return { raw: result }; }
   }
@@ -18,7 +16,8 @@ export default async function handler(req, res) {
 
   try {
     const jobRes = await pool.query(
-      `SELECT status, progress, result, retry_count, started_at, last_progress_at, heartbeat, duration_ms, provider_used
+      `SELECT id, status, progress, result, retry_count,
+              started_at, last_progress_at, heartbeat, duration_ms, provider_used
        FROM scan_jobs WHERE id = $1`,
       [jobId]
     );
@@ -26,35 +25,48 @@ export default async function handler(req, res) {
 
     const job = jobRes.rows[0];
     const resultObj = safeParseResult(job.result);
-
-    // Compute elapsed time
     let elapsed = 0;
     if (job.started_at) {
       elapsed = Math.round((Date.now() - new Date(job.started_at).getTime()) / 1000);
     }
 
-    // Map to internal state
-    let state = job.status; // pending, processing, retrying, complete, failed
-    if (state === 'processing' && job.progress === 'enhancing') state = 'analysing';
-    else if (state === 'processing' && job.progress === 'reading_handwriting') state = 'extracting';
-    else if (state === 'processing' && job.progress === 'matching_community') state = 'matching';
-    else if (state === 'processing' && job.progress === 'building_memory') state = 'saving';
-    else if (state === 'complete') state = 'completed';
-    else if (state === 'retrying') state = 'retrying';
-    else if (state === 'failed') state = 'failed';
+    let message = '';
+    let error = null;
+    const state = job.status;
+    const progress = job.progress;
 
-    // Build user message
-    let message = ariaMessageForState(state, job.progress, elapsed);
-
-    // If job has been stuck for > 90 seconds without progress, suggest staleness
-    if (state === 'processing' && elapsed > 90) {
-      message = 'This is taking longer than usual. ARIA is still working…';
+    if (state === 'pending') message = 'ARIA is preparing to read the register…';
+    else if (state === 'processing' && progress === 'enhancing') message = 'ARIA is enhancing the image clarity…';
+    else if (state === 'processing' && progress === 'reading_handwriting') message = 'ARIA is reading the handwriting…';
+    else if (state === 'processing' && progress === 'validating') message = 'ARIA is validating the extracted data…';
+    else if (state === 'processing' && progress === 'matching_community') message = 'ARIA is comparing with your community…';
+    else if (state === 'processing' && progress === 'building_memory') message = 'ARIA is saving the verified records…';
+    else if (state === 'retrying') message = resultObj?.message || 'ARIA is taking a little longer than usual…';
+    else if (state === 'complete') message = 'Scan complete.';
+    else if (state === 'failed') {
+      // Read structured error if present
+      if (resultObj && resultObj.error) {
+        const err = resultObj.error;
+        message = err.userMessage || 'ARIA could not complete this scan safely.';
+        error = {
+          code: err.code || 'UNKNOWN_ERROR',
+          stage: err.stage || 'unknown',
+          details: err.details || null,
+        };
+        // Also log error details server-side
+        console.error(`Scan ${jobId} failed: stage=${err.stage}, code=${err.code}, techMsg=${err.message}`);
+      } else {
+        // Fallback for legacy failures
+        message = resultObj?.error || 'ARIA could not read the register. Please try again with a clearer photo.';
+        if (message.includes('Rate limit') || message.includes('rate limit')) {
+          message = 'ARIA is very busy right now. Please try again in a few minutes.';
+        }
+      }
     }
-    if (state === 'processing' && elapsed > 180) {
-      message = 'This scan appears to have stalled. Your existing data is safe. You can try again.';
-    }
 
-    // Return sanitized response
+    if (state === 'processing' && elapsed > 90) message = 'This is taking longer than usual. ARIA is still working…';
+    if (state === 'processing' && elapsed > 180) message = 'This scan appears to have stalled. Your existing data is safe. You can try again.';
+
     res.status(200).json({
       status: job.status,
       progress: job.progress,
@@ -62,10 +74,11 @@ export default async function handler(req, res) {
       retry_count: job.retry_count || 0,
       elapsed_seconds: elapsed,
       provider: job.provider_used,
-      result: state === 'completed' ? resultObj : null,
+      result: state === 'complete' ? resultObj : null,
+      error: state === 'failed' ? error : null,
     });
   } catch (err) {
     console.error('Status error:', err);
     res.status(500).json({ error: 'ARIA is having trouble. Please try again.' });
   }
-}
+      }
