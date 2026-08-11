@@ -1,4 +1,4 @@
-// pages/attendance.js – FIDUCIA CARE Premium Attendance
+// pages/attendance.js – Premium Responsive Attendance Page (with group wrapping & inline button)
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 
@@ -14,7 +14,7 @@ export default function AttendancePage() {
 
   const orgId = 'demo-org';
 
-  // ─── Data fetching (unchanged) ───
+  // ─── Fetch active session ───
   const fetchActiveSession = useCallback(async () => {
     try {
       const res = await fetch(`/api/attendance/active-session?organization_id=${orgId}`);
@@ -35,6 +35,7 @@ export default function AttendancePage() {
     }
   }, []);
 
+  // ─── Fetch groups ───
   const fetchGroups = async (sessionId) => {
     try {
       const res = await fetch(`/api/attendance/groups?organization_id=${orgId}`);
@@ -50,6 +51,7 @@ export default function AttendancePage() {
     }
   };
 
+  // ─── Fetch people for a group ───
   const fetchPeopleForGroup = async (groupId) => {
     try {
       const res = await fetch(`/api/attendance/people-for-group?group_id=${groupId}&organization_id=${orgId}`);
@@ -61,6 +63,7 @@ export default function AttendancePage() {
     }
   };
 
+  // ─── Create a new session ───
   const createSession = async () => {
     const name = prompt('Enter session name (e.g., Sunday Worship):');
     if (!name) return;
@@ -86,6 +89,7 @@ export default function AttendancePage() {
     }
   };
 
+  // ─── Claim a group ───
   const claimGroup = async (groupId) => {
     if (!userName.trim()) {
       alert('Please enter your name first.');
@@ -118,6 +122,7 @@ export default function AttendancePage() {
     }
   };
 
+  // ─── Mark attendance ───
   const markAttendance = async (personId, present) => {
     if (!session) return;
     try {
@@ -152,31 +157,29 @@ export default function AttendancePage() {
 
   const markedCount = people.filter(p => p.marked).length;
 
-  // ─── Shimmer loading ───
   if (loading) {
     return (
       <Layout>
-        <div className="shimmer-container">
-          <div className="shimmer-line" style={{ height: 60, width: '100%' }} />
-          <div className="shimmer-line" style={{ height: 40, width: '70%' }} />
-          <div className="shimmer-line" style={{ height: 40, width: '50%' }} />
-          <div className="shimmer-line" style={{ height: 60, width: '100%' }} />
-          <div className="shimmer-line" style={{ height: 60, width: '100%' }} />
+        <div className="attendance-loading">
+          <div className="loading-skeleton" />
+          <div className="loading-skeleton" style={{ width: '70%' }} />
+          <div className="loading-skeleton" style={{ width: '50%' }} />
         </div>
         <style jsx>{`
-          .shimmer-container {
+          .attendance-loading {
             max-width: 800px;
             margin: 0 auto;
-            padding: 20px;
+            padding: var(--space-xl) var(--space-md);
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: var(--space-md);
           }
-          .shimmer-line {
+          .loading-skeleton {
+            height: 60px;
             border-radius: 12px;
-            background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+            background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
             background-size: 200% 100%;
-            animation: shimmer 1.8s ease-in-out infinite;
+            animation: shimmer 1.5s ease-in-out infinite;
           }
           @keyframes shimmer {
             0% { background-position: -200% 0; }
@@ -190,34 +193,36 @@ export default function AttendancePage() {
   return (
     <Layout>
       <div className="attendance-container">
-        {/* ─── Header ─── */}
-        <div className="attendance-header">
+        <header className="attendance-header">
           <h1 className="attendance-title">Attendance</h1>
           {session && (
-            <span className="session-badge">{session.name}</span>
+            <span className="session-status-badge">
+              {session.name}
+            </span>
           )}
-        </div>
+        </header>
 
         {error && (
-          <div className="error-box">{error}</div>
+          <div className="attendance-error">
+            {error}
+          </div>
         )}
 
-        {/* ─── Session Card ─── */}
-        <div className="fiducia-card session-card">
+        <section className="session-card">
           {session ? (
             <>
               <div className="session-info">
-                <div className="session-name">{session.name}</div>
-                <div className="session-date">
+                <span className="session-name">{session.name}</span>
+                <span className="session-date">
                   {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                </div>
+                </span>
               </div>
               <div className="session-progress">
                 <div className="progress-label">
                   <span>{markedCount} present</span>
                   <span>of {people.length}</span>
                 </div>
-                <div className="progress-track">
+                <div className="progress-bar">
                   <div
                     className="progress-fill"
                     style={{ width: people.length > 0 ? `${(markedCount / people.length) * 100}%` : 0 }}
@@ -226,26 +231,27 @@ export default function AttendancePage() {
               </div>
               <button
                 onClick={fetchActiveSession}
-                className="fiducia-button fiducia-button-ghost"
-                style={{ padding: '6px 16px', fontSize: 14 }}
+                className="button button-ghost session-refresh"
               >
                 Refresh
               </button>
             </>
           ) : (
             <>
-              <p className="no-session">No active session.</p>
-              <button onClick={createSession} className="fiducia-button fiducia-button-primary">
+              <p className="no-session-message">No active session.</p>
+              <button onClick={createSession} className="button button-primary">
                 Start Attendance
               </button>
             </>
           )}
-        </div>
+        </section>
 
-        {/* ─── Username ─── */}
         <div className="username-section">
-          <label className="username-label">Your Name (for claiming groups)</label>
+          <label htmlFor="username-input" className="username-label">
+            Your Name (for claiming groups)
+          </label>
           <input
+            id="username-input"
             type="text"
             value={userName}
             onChange={e => setUserName(e.target.value)}
@@ -254,11 +260,10 @@ export default function AttendancePage() {
           />
         </div>
 
-        {/* ─── Groups ─── */}
         {session && groups.length > 0 && (
-          <div className="groups-section">
+          <section className="groups-section">
             <h2 className="section-title">Groups</h2>
-            <div className="groups-scroll">
+            <div className="groups-wrap">
               {groups.map(g => (
                 <button
                   key={g.id}
@@ -272,25 +277,23 @@ export default function AttendancePage() {
                 </button>
               ))}
             </div>
-          </div>
+          </section>
         )}
 
-        {/* ─── Claim ─── */}
         {session && selectedGroup && (
           <div className="claim-section">
             <button
               onClick={() => claimGroup(selectedGroup)}
               disabled={claimedGroups[selectedGroup]}
-              className={`fiducia-button fiducia-button-secondary ${claimedGroups[selectedGroup] ? 'claimed' : ''}`}
+              className={`button button-secondary ${claimedGroups[selectedGroup] ? 'claimed' : ''}`}
             >
               {claimedGroups[selectedGroup] ? '✓ Claimed' : 'Claim this group'}
             </button>
           </div>
         )}
 
-        {/* ─── People List ─── */}
         {session && people.length > 0 && (
-          <div className="people-section">
+          <section className="people-section">
             <div className="people-header">
               <h2 className="section-title">People</h2>
               <span className="people-count">{markedCount} marked</span>
@@ -299,7 +302,7 @@ export default function AttendancePage() {
               {people.map(p => (
                 <div
                   key={p.id}
-                  className={`person-row ${p.marked ? 'marked' : ''}`}
+                  className={`person-card ${p.marked ? 'marked' : ''}`}
                 >
                   <div className="person-info">
                     <span className="person-name">{p.first_name}</span>
@@ -307,73 +310,96 @@ export default function AttendancePage() {
                   </div>
                   <button
                     onClick={() => markAttendance(p.id, !p.marked)}
-                    className={`fiducia-button ${p.marked ? 'fiducia-button-primary' : 'fiducia-button-ghost'}`}
-                    style={{ padding: '6px 16px', fontSize: 13, flexShrink: 0 }}
+                    className={`button button-mark ${p.marked ? 'marked' : ''}`}
                   >
                     {p.marked ? 'Present ✓' : 'Mark Present'}
                   </button>
                 </div>
               ))}
             </div>
-          </div>
+          </section>
         )}
       </div>
 
       <style jsx>{`
-        .attendance-container {
-          max-width: 800px;
-          margin: 0 auto;
-          padding: 20px;
-          padding-bottom: 100px;
-        }
-        @media (min-width: 768px) {
-          .attendance-container { padding: 30px 40px; }
+        :root {
+          --space-xs: 4px;
+          --space-sm: 8px;
+          --space-md: 16px;
+          --space-lg: 24px;
+          --space-xl: 32px;
+          --radius: 12px;
+          --font-base: clamp(14px, 1.5vw, 16px);
+          --color-gold: #D4AF37;
+          --color-bg: rgba(255,255,255,0.03);
+          --color-border: rgba(255,255,255,0.06);
+          --color-text: #f0f0f0;
+          --color-text-muted: rgba(255,255,255,0.5);
         }
 
+        .attendance-container {
+          max-width: 900px;
+          margin: 0 auto;
+          padding: var(--space-md);
+          padding-bottom: 100px;
+          overflow-x: hidden;
+          font-size: var(--font-base);
+          line-height: 1.5;
+        }
+
+        @media (min-width: 768px) {
+          .attendance-container {
+            padding: var(--space-lg) var(--space-xl);
+          }
+        }
+
+        /* ─── Header ─── */
         .attendance-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 24px;
+          margin-bottom: var(--space-lg);
           flex-wrap: wrap;
-          gap: 8px;
+          gap: var(--space-sm);
         }
         .attendance-title {
-          font-size: clamp(22px, 4vw, 28px);
+          font-size: clamp(20px, 4vw, 28px);
           font-weight: 600;
-          color: #f0f0f0;
+          color: var(--color-text);
           margin: 0;
         }
-        .session-badge {
-          font-size: 14px;
-          padding: 4px 14px;
+        .session-status-badge {
+          font-size: 0.8rem;
+          padding: 4px 12px;
           border-radius: 20px;
-          background: rgba(212,175,55,0.12);
-          color: #D4AF37;
-          border: 1px solid rgba(212,175,55,0.2);
+          background: rgba(212, 175, 55, 0.15);
+          color: var(--color-gold);
+          border: 1px solid rgba(212, 175, 55, 0.2);
           white-space: nowrap;
         }
-        .error-box {
-          background: rgba(239,68,68,0.08);
+
+        .attendance-error {
+          background: rgba(239, 68, 68, 0.1);
           border: 1px solid #EF4444;
-          border-radius: 12px;
-          padding: 12px 16px;
+          border-radius: var(--radius);
+          padding: var(--space-md);
+          margin-bottom: var(--space-lg);
           color: #EF4444;
-          margin-bottom: 20px;
+          font-size: 0.9rem;
         }
 
         /* ─── Session Card ─── */
         .session-card {
-          padding: 20px 24px;
-          margin-bottom: 24px;
+          background: var(--color-bg);
+          border: 1px solid var(--color-border);
+          border-radius: var(--radius);
+          padding: var(--space-md) var(--space-lg);
+          margin-bottom: var(--space-lg);
           display: flex;
           flex-wrap: wrap;
           align-items: center;
           justify-content: space-between;
-          gap: 16px;
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 16px;
+          gap: var(--space-md);
         }
         .session-info {
           display: flex;
@@ -382,12 +408,12 @@ export default function AttendancePage() {
         }
         .session-name {
           font-weight: 600;
-          font-size: 18px;
-          color: #f0f0f0;
+          color: var(--color-text);
+          font-size: 1.1rem;
         }
         .session-date {
-          font-size: 14px;
-          color: rgba(255,255,255,0.5);
+          color: var(--color-text-muted);
+          font-size: 0.8rem;
         }
         .session-progress {
           flex: 1;
@@ -396,136 +422,196 @@ export default function AttendancePage() {
         .progress-label {
           display: flex;
           justify-content: space-between;
-          font-size: 13px;
-          color: rgba(255,255,255,0.5);
+          font-size: 0.8rem;
+          color: var(--color-text-muted);
           margin-bottom: 4px;
         }
-        .progress-track {
+        .progress-bar {
           height: 4px;
-          border-radius: 4px;
           background: rgba(255,255,255,0.06);
+          border-radius: 4px;
           overflow: hidden;
         }
         .progress-fill {
           height: 100%;
-          background: #D4AF37;
+          background: var(--color-gold);
           border-radius: 4px;
-          transition: width 0.5s ease;
+          transition: width 0.4s ease;
         }
-        .no-session {
-          color: rgba(255,255,255,0.5);
+        .session-refresh {
+          margin-left: auto;
+        }
+        .no-session-message {
+          color: var(--color-text-muted);
           margin: 0;
         }
 
-        /* ─── Username ─── */
+        .button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 10px 20px;
+          border-radius: 30px;
+          font-weight: 500;
+          font-size: 0.9rem;
+          border: 1px solid transparent;
+          cursor: pointer;
+          transition: all 0.2s;
+          touch-action: manipulation;
+          min-height: 44px;
+          text-decoration: none;
+          background: transparent;
+          color: var(--color-text);
+        }
+        .button-primary {
+          background: rgba(212, 175, 55, 0.15);
+          border-color: rgba(212, 175, 55, 0.3);
+          color: var(--color-gold);
+        }
+        .button-primary:active {
+          background: rgba(212, 175, 55, 0.25);
+          transform: scale(0.98);
+        }
+        .button-secondary {
+          background: rgba(255,255,255,0.04);
+          border-color: rgba(255,255,255,0.08);
+          color: var(--color-text);
+        }
+        .button-secondary:active {
+          background: rgba(255,255,255,0.08);
+        }
+        .button-ghost {
+          background: transparent;
+          border-color: rgba(255,255,255,0.08);
+          color: var(--color-text-muted);
+        }
+        .button-ghost:active {
+          background: rgba(255,255,255,0.04);
+        }
+        .button-mark {
+          padding: 6px 16px;
+          font-size: 0.8rem;
+          background: rgba(255,255,255,0.04);
+          border-color: rgba(255,255,255,0.08);
+          color: var(--color-text);
+          min-height: 36px;
+          flex-shrink: 0;
+        }
+        .button-mark.marked {
+          background: rgba(52, 211, 153, 0.15);
+          border-color: rgba(52, 211, 153, 0.2);
+          color: #34D399;
+        }
+        .button-mark:active {
+          transform: scale(0.96);
+        }
+        .button.claimed {
+          opacity: 0.6;
+          cursor: default;
+        }
+
         .username-section {
-          margin-bottom: 20px;
+          margin-bottom: var(--space-lg);
         }
         .username-label {
           display: block;
-          font-size: 14px;
-          color: rgba(255,255,255,0.5);
-          margin-bottom: 4px;
+          color: var(--color-text-muted);
+          font-size: 0.8rem;
+          margin-bottom: var(--space-xs);
         }
         .username-input {
           width: 100%;
           padding: 10px 14px;
-          border-radius: 10px;
-          border: 1px solid rgba(255,255,255,0.06);
-          background: rgba(255,255,255,0.03);
-          color: #f0f0f0;
-          font-size: 16px;
+          border-radius: var(--radius);
+          border: 1px solid var(--color-border);
+          background: var(--color-bg);
+          color: var(--color-text);
+          font-size: 1rem;
           outline: none;
+          transition: border-color 0.2s;
         }
         .username-input:focus {
-          border-color: rgba(212,175,55,0.3);
+          border-color: rgba(212, 175, 55, 0.4);
         }
 
-        /* ─── Groups ─── */
+        /* ─── Groups – now wrap (no horizontal scroll) ─── */
         .groups-section {
-          margin-bottom: 20px;
+          margin-bottom: var(--space-lg);
         }
         .section-title {
-          font-size: 16px;
+          font-size: 1rem;
           font-weight: 600;
-          color: #f0f0f0;
-          margin: 0 0 10px 0;
+          color: var(--color-text);
+          margin: 0 0 var(--space-sm) 0;
         }
-        .groups-scroll {
+        .groups-wrap {
           display: flex;
-          gap: 8px;
-          overflow-x: auto;
-          padding-bottom: 8px;
-          -webkit-overflow-scrolling: touch;
-        }
-        .groups-scroll::-webkit-scrollbar {
-          height: 4px;
-        }
-        .groups-scroll::-webkit-scrollbar-thumb {
-          background: rgba(255,255,255,0.1);
-          border-radius: 4px;
+          flex-wrap: wrap;
+          gap: var(--space-sm);
+          align-items: center;
         }
         .group-tab {
-          flex-shrink: 0;
           padding: 8px 16px;
           border-radius: 20px;
-          border: 1px solid rgba(255,255,255,0.06);
+          border: 1px solid var(--color-border);
           background: transparent;
-          color: rgba(255,255,255,0.6);
-          font-size: 14px;
+          color: var(--color-text-muted);
+          font-size: 0.85rem;
           cursor: pointer;
           transition: all 0.2s;
+          touch-action: manipulation;
           white-space: nowrap;
           min-height: 40px;
+          flex-shrink: 0;
         }
         .group-tab.active {
-          background: rgba(212,175,55,0.08);
-          border-color: rgba(212,175,55,0.2);
-          color: #D4AF37;
+          background: rgba(212, 175, 55, 0.12);
+          border-color: rgba(212, 175, 55, 0.3);
+          color: var(--color-gold);
+          font-weight: 500;
+        }
+        .group-tab:active {
+          transform: scale(0.96);
         }
 
-        /* ─── Claim ─── */
         .claim-section {
-          margin-bottom: 20px;
-        }
-        .claimed {
-          opacity: 0.5;
-          cursor: default;
+          margin-bottom: var(--space-lg);
         }
 
-        /* ─── People ─── */
+        /* ─── People List – button stays inline ─── */
         .people-section {
-          margin-top: 20px;
+          margin-top: var(--space-lg);
         }
         .people-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          margin-bottom: 12px;
+          margin-bottom: var(--space-md);
         }
         .people-count {
-          font-size: 14px;
-          color: rgba(255,255,255,0.4);
+          font-size: 0.85rem;
+          color: var(--color-text-muted);
         }
         .people-list {
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: var(--space-sm);
         }
-        .person-row {
+        .person-card {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 10px 16px;
-          background: rgba(255,255,255,0.02);
-          border: 1px solid rgba(255,255,255,0.04);
-          border-radius: 12px;
-          gap: 12px;
+          background: var(--color-bg);
+          border: 1px solid var(--color-border);
+          border-radius: var(--radius);
+          padding: 10px 14px;
           transition: all 0.2s;
+          gap: var(--space-sm);
+          flex-wrap: nowrap;  /* keep everything on one line */
         }
-        .person-row.marked {
-          background: rgba(52,211,153,0.04);
-          border-color: rgba(52,211,153,0.1);
+        .person-card.marked {
+          background: rgba(52, 211, 153, 0.04);
+          border-color: rgba(52, 211, 153, 0.1);
         }
         .person-info {
           display: flex;
@@ -535,35 +621,49 @@ export default function AttendancePage() {
         }
         .person-name {
           font-weight: 500;
-          font-size: 16px;
-          color: #f0f0f0;
+          color: var(--color-text);
+          font-size: 1rem;
+          line-height: 1.3;
+          word-break: break-word;
         }
         .person-phone {
-          font-size: 13px;
-          color: rgba(255,255,255,0.4);
+          font-size: 0.8rem;
+          color: var(--color-text-muted);
         }
         @media (max-width: 480px) {
-          .session-card {
-            flex-direction: column;
-            align-items: stretch;
+          .person-card {
+            padding: 8px 12px;
           }
-          .person-row {
-            flex-wrap: wrap;
+          .button-mark {
+            padding: 4px 12px;
+            font-size: 0.75rem;
+            min-height: 32px;
           }
-          .person-info {
-            flex: 1 1 60%;
+          .group-tab {
+            padding: 6px 12px;
+            font-size: 0.75rem;
+            min-height: 32px;
           }
-          .person-name {
-            font-size: 15px;
+        }
+        @media (min-width: 481px) {
+          .person-card {
+            padding: 12px 18px;
+          }
+          .button-mark {
+            padding: 8px 20px;
+            font-size: 0.85rem;
+            min-height: 40px;
           }
         }
         @media (min-width: 768px) {
-          .groups-scroll {
-            overflow-x: visible;
-            flex-wrap: wrap;
+          .person-card {
+            padding: 14px 20px;
+          }
+          .groups-wrap {
+            gap: var(--space-sm);
           }
         }
       `}</style>
     </Layout>
   );
-    }
+}
