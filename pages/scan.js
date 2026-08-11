@@ -128,7 +128,7 @@ export default function ScanPage() {
     }, 2000);
   };
 
-  // Reveal results
+  // Reveal results (unchanged)
   const revealResults = async (resultData) => {
     const people = resultData?.people || [];
     updateState({ stage: 'revealing', revealedPeople: [], ariaMessages: [] });
@@ -197,7 +197,7 @@ export default function ScanPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image_base64: base64,
-          church_id: 'demo-org',
+          organization_id: 'demo-org',   // UPDATED: was church_id
           program_name: programName.trim() || 'GIBEON',
         }),
       });
@@ -356,4 +356,4 @@ export default function ScanPage() {
       `}</style>
     </Layout>
   );
-  }
+}
