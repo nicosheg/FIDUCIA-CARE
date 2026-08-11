@@ -1,13 +1,14 @@
+// pages/api/scan/start.js
 import pool from '../../../lib/db';
 import { processVisionJob } from '../../../lib/visionProcessor';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { image_base64, church_id, program_name } = req.body;
+  const { image_base64, organization_id, program_name } = req.body;
   if (!image_base64) return res.status(400).json({ error: 'No image data' });
 
-  const orgId = church_id || 'demo-org';
+  const orgId = organization_id || 'demo-org';   // UPDATED: was church_id
   const programName = program_name || 'GIBEON';
 
   try {
@@ -21,7 +22,7 @@ export default async function handler(req, res) {
     // Respond immediately
     res.status(200).json({ job_id: jobId });
 
-    // Process in background (don't await – fire and forget)
+    // Process in background (fire and forget)
     processVisionJob(jobId, image_base64, orgId, programName).catch(err =>
       console.error('Background job failed:', err)
     );
@@ -29,4 +30,4 @@ export default async function handler(req, res) {
     console.error('Failed to start scan job:', error);
     res.status(500).json({ error: error.message });
   }
-                     }
+}
