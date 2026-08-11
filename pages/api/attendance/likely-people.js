@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     const result = await pool.query(
       `SELECT p.id, p.display_name, p.first_name, p.phone, p.type, COUNT(um.id) as mark_count
        FROM usher_marks um
-       JOIN people p ON um.person_id = p.id
+       JOIN people p ON um.people_id = p.id
        WHERE um.usher_id = $1 AND p.organization_id = $2
        GROUP BY p.id
        ORDER BY mark_count DESC
