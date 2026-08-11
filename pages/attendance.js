@@ -102,7 +102,7 @@ export default function AttendancePage() {
         body: JSON.stringify({
           session_id: session.session_id,
           group_id: groupId,
-          user_name: userName,   // ✅ changed from usher_name
+          user_name: userName,
         }),
       });
       const data = await res.json();
@@ -133,12 +133,11 @@ export default function AttendancePage() {
           session_id: session.session_id,
           people_id: personId,
           present,
-          user_id: userName, // using userName as identifier (could be user ID, but we use name for now)
+          user_id: userName,
           group_id: selectedGroup,
         }),
       });
       if (res.ok) {
-        // Update local state to reflect change
         setPeople(prev => prev.map(p =>
           p.id === personId ? { ...p, marked: present } : p
         ));
@@ -175,7 +174,6 @@ export default function AttendancePage() {
           </div>
         )}
 
-        {/* Active session */}
         {session ? (
           <div className="fiducia-card" style={{ padding: '16px 20px', marginBottom: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -201,7 +199,6 @@ export default function AttendancePage() {
           </div>
         )}
 
-        {/* User name input */}
         <div style={{ marginBottom: 20 }}>
           <label style={{ display: 'block', color: 'rgba(255,255,255,0.6)', fontSize: 14, marginBottom: 4 }}>
             Your Name (for claiming groups)
@@ -223,7 +220,6 @@ export default function AttendancePage() {
           />
         </div>
 
-        {/* Groups */}
         {session && groups.length > 0 && (
           <div style={{ marginBottom: 24 }}>
             <h2 style={{ color: '#f0f0f0', fontSize: 18, fontWeight: 600, marginBottom: 12 }}>Groups</h2>
@@ -252,7 +248,6 @@ export default function AttendancePage() {
           </div>
         )}
 
-        {/* Claim group button */}
         {session && selectedGroup && (
           <div style={{ marginBottom: 20 }}>
             <button
@@ -266,7 +261,6 @@ export default function AttendancePage() {
           </div>
         )}
 
-        {/* People list with attendance toggle */}
         {session && people.length > 0 && (
           <div>
             <h2 style={{ color: '#f0f0f0', fontSize: 18, fontWeight: 600, marginBottom: 12 }}>
@@ -284,14 +278,25 @@ export default function AttendancePage() {
                     alignItems: 'center',
                     background: p.marked ? 'rgba(52,211,153,0.08)' : 'transparent',
                     border: p.marked ? '1px solid rgba(52,211,153,0.2)' : '1px solid rgba(255,255,255,0.05)',
+                    borderRadius: 10,
+                    gap: 12,
                   }}
                 >
-                  <span style={{ color: '#f0f0f0' }}>{p.first_name}</span>
-                  <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14 }}>{p.phone || 'No phone'}</span>
+                  <span style={{ color: '#f0f0f0', fontWeight: 500, flexShrink: 0, minWidth: 120 }}>
+                    {p.first_name}
+                  </span>
+                  <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14, flexShrink: 1, minWidth: 100 }}>
+                    {p.phone || 'No phone'}
+                  </span>
                   <button
                     onClick={() => markAttendance(p.id, !p.marked)}
                     className={p.marked ? 'fiducia-button fiducia-button-primary' : 'fiducia-button fiducia-button-ghost'}
-                    style={{ padding: '4px 12px', fontSize: 13 }}
+                    style={{
+                      padding: '4px 16px',
+                      fontSize: 13,
+                      flexShrink: 0,
+                      marginLeft: 'auto',
+                    }}
                   >
                     {p.marked ? 'Present ✓' : 'Mark Present'}
                   </button>
@@ -303,4 +308,4 @@ export default function AttendancePage() {
       </div>
     </Layout>
   );
-}
+                 }
