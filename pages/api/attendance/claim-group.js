@@ -1,3 +1,4 @@
+// pages/api/attendance/claim-group.js
 import pool from '../../../lib/db';
 
 export default async function handler(req, res) {
@@ -34,4 +35,4 @@ export default async function handler(req, res) {
     console.error('Claim group error:', err);
     return res.status(500).json({ error: err.message });
   }
-          }
+  }
