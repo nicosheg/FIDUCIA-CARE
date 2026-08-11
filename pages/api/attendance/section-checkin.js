@@ -16,10 +16,10 @@ export default async function handler(req, res) {
 
     for (const memberId of present_ids) {
       await client.query(
-        `INSERT INTO attendance_records (member_id, attendance_date, present, session_section_id)
+        `INSERT INTO attendance_records (people_id, attendance_date, present, session_section_id)
          VALUES ($1, $2, true, $3)
-         ON CONFLICT (member_id, attendance_date) DO UPDATE SET present = true, session_section_id = $3`,
-        [memberId, today, sectionId]
+         ON CONFLICT (people_id, attendance_date) DO UPDATE SET present = true, session_section_id = $3`,
+        [peopleId, today, sectionId]
       );
     }
     res.json({ success: true });
