@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     await client.query('BEGIN');
     // Create session
     const sessionRes = await client.query(
-      `INSERT INTO sessions (church_id, name, status) VALUES ($1, $2, 'active') RETURNING id`,
+      `INSERT INTO sessions (organization_id, name, status) VALUES ($1, $2, 'active') RETURNING id`,
       [orgId, name]
     );
     const sessionId = sessionRes.rows[0].id;
