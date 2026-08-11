@@ -12,9 +12,9 @@ export default async function handler(req, res) {
     const baseQuery = `
       SELECT p.*,
              (SELECT MAX(ar.attendance_date) FROM attendance_records ar
-              WHERE ar.member_id = p.id AND ar.present = true) AS last_attended_date,
+              WHERE ar.people_id = p.id AND ar.present = true) AS last_attended_date,
              (SELECT MAX(te.created_at) FROM timeline_events te
-              WHERE te.person_id = p.id
+              WHERE te.people_id = p.id
                 AND te.event_type IN ('message_sent','call','note','aria_draft')) AS last_contacted
       FROM people p
       WHERE p.organization_id = $1
@@ -124,4 +124,4 @@ export default async function handler(req, res) {
   }
 
   res.status(405).end();
-      }
+        }
