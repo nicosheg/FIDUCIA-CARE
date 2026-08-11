@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     const recent = await pool.query(
       `SELECT DISTINCT p.id, p.first_name, p.phone, p.type
        FROM people p
-       JOIN usher_marks um ON um.person_id = p.id
+       JOIN usher_marks um ON um.people_id = p.id
        WHERE p.organization_id = $1 AND um.usher_id = $2
        ORDER BY um.created_at DESC LIMIT 20`,
       [orgId, usher_id]
