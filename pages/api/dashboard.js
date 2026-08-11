@@ -9,7 +9,7 @@ export default async function handler(req, res) {
     const attendanceRes = await pool.query(
       `SELECT ar.present
        FROM attendance_records ar
-       JOIN people p ON ar.member_id = p.id
+       JOIN people p ON ar.people_id = p.id
        WHERE p.organization_id = $1 AND ar.attendance_date = $2`,
       [orgId, today]
     );
