@@ -1,27 +1,28 @@
 import pool from '../../../lib/db';
 
 export default async function handler(req, res) {
-  const { q, usher_id, session_id, group_id, organization_id } = req.query;
+  const { q, user_id, session_id, group_id, organization_id } = req.query;
   const orgId = organization_id || 'demo-org';
 
   let people = [];
-  if (usher_id) {
-    // Progressive recognition: recently marked by this usher
+
+  if (user_id) {
+    // Progressive recognition: recently marked by this user
     const recent = await pool.query(
       `SELECT DISTINCT p.id, p.first_name, p.phone, p.type
        FROM people p
-       JOIN usher_marks um ON um.people_id = p.id
-       WHERE p.organization_id = $1 AND um.usher_id = $2
+       JOIN user_marks um ON um.people_id = p.id
+       WHERE p.organization_id = $1 AND um.user_id = $2
        ORDER BY um.created_at DESC LIMIT 20`,
-      [orgId, usher_id]
+      [orgId, user_id]
     );
     people = recent.rows;
   } else if (q) {
     // Fast search – case‑insensitive, any word
     const words = q.trim().split(/\s+/);
     if (words.length > 0) {
-      let query = `SELECT id, first_name, phone, type FROM people WHERE organization_id = $1 AND (`;
       const params = [orgId];
+      let query = `SELECT id, first_name, phone, type FROM people WHERE organization_id = $1 AND (`;
       words.forEach((word, i) => {
         if (i > 0) query += ' AND ';
         query += `(first_name ILIKE $${i + 2} OR phone ILIKE $${i + 2})`;
@@ -41,4 +42,4 @@ export default async function handler(req, res) {
   }
 
   res.status(200).json(people);
-}
+      }
