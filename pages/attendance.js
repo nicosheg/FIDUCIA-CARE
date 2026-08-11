@@ -1,4 +1,4 @@
-// pages/attendance.js – Premium Responsive Attendance Page (with group wrapping & inline button)
+// pages/attendance.js – Premium Responsive Attendance Page
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 
@@ -157,6 +157,7 @@ export default function AttendancePage() {
 
   const markedCount = people.filter(p => p.marked).length;
 
+  // ─── Render loading with subtle shimmer ───
   if (loading) {
     return (
       <Layout>
@@ -177,13 +178,17 @@ export default function AttendancePage() {
           .loading-skeleton {
             height: 60px;
             border-radius: 12px;
-            background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
+            background: linear-gradient(110deg, 
+              rgba(255,255,255,0.02) 25%, 
+              rgba(255,255,255,0.05) 50%, 
+              rgba(255,255,255,0.02) 75%
+            );
             background-size: 200% 100%;
-            animation: shimmer 1.5s ease-in-out infinite;
+            animation: shimmer 5s ease-in-out infinite;
           }
           @keyframes shimmer {
-            0% { background-position: -200% 0; }
-            100% { background-position: 200% 0; }
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
           }
         `}</style>
       </Layout>
@@ -534,7 +539,7 @@ export default function AttendancePage() {
           border-color: rgba(212, 175, 55, 0.4);
         }
 
-        /* ─── Groups – now wrap (no horizontal scroll) ─── */
+        /* ─── Groups – wrap (no horizontal scroll) ─── */
         .groups-section {
           margin-bottom: var(--space-lg);
         }
@@ -607,7 +612,7 @@ export default function AttendancePage() {
           padding: 10px 14px;
           transition: all 0.2s;
           gap: var(--space-sm);
-          flex-wrap: nowrap;  /* keep everything on one line */
+          flex-wrap: nowrap;
         }
         .person-card.marked {
           background: rgba(52, 211, 153, 0.04);
