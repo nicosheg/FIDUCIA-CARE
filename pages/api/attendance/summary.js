@@ -7,12 +7,12 @@ export default async function handler(req, res) {
   try {
     const result = await pool.query(
       `SELECT
-         COUNT(DISTINCT ar.member_id) FILTER (WHERE ar.present = true) as total_attended,
-         COUNT(DISTINCT ar.member_id) FILTER (WHERE ar.present = true AND p.type = 'visitor') as visitors,
-         COUNT(DISTINCT ar.member_id) FILTER (WHERE ar.present = true AND p.created_at::date = ar.marked_at::date AND p.type = 'visitor') as new_members,
-         COUNT(DISTINCT ar.member_id) FILTER (WHERE ar.present = true AND p.last_contacted IS NULL) as needs_followup
+         COUNT(DISTINCT ar.people_id) FILTER (WHERE ar.present = true) as total_attended,
+         COUNT(DISTINCT ar.people_id) FILTER (WHERE ar.present = true AND p.type = 'visitor') as visitors,
+         COUNT(DISTINCT ar.people_id) FILTER (WHERE ar.present = true AND p.created_at::date = ar.marked_at::date AND p.type = 'visitor') as new_people,
+         COUNT(DISTINCT ar.people_id) FILTER (WHERE ar.present = true AND p.last_contacted IS NULL) as needs_followup
        FROM attendance_records ar
-       JOIN people p ON ar.member_id = p.id
+       JOIN people p ON ar.people_id = p.id
        WHERE ar.session_id = $1`,
       [sessionId]
     );
