@@ -20,11 +20,11 @@ export default async function handler(req, res) {
     res.status(200).json({
       total_attended: parseInt(row.total_attended) || 0,
       visitors: parseInt(row.visitors) || 0,
-      new_people: parseInt(row.new_people) || 0,
+      new_members: parseInt(row.new_people) || 0,
       needs_followup: parseInt(row.needs_followup) || 0,
     });
   } catch (err) {
     console.error('Summary error:', err);
     res.status(500).json({ error: err.message });
   }
-  }
+      }
