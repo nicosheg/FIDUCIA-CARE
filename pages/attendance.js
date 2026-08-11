@@ -1,4 +1,4 @@
-// pages/attendance.js – Fully adapted to FIDUCIA design system
+// pages/attendance.js – FIDUCIA design system only
 import { useState, useEffect, useCallback } from 'react';
 import Layout from '../components/Layout';
 
@@ -367,7 +367,6 @@ export default function AttendancePage() {
           font-size: 0.9rem;
         }
 
-        /* ─── Session Card ─── */
         .session-card {
           display: flex;
           flex-wrap: wrap;
@@ -423,7 +422,6 @@ export default function AttendancePage() {
           margin: 0;
         }
 
-        /* ─── Username ─── */
         .username-section {
           margin-bottom: 24px;
         }
@@ -448,7 +446,6 @@ export default function AttendancePage() {
           border-color: rgba(212, 175, 55, 0.3);
         }
 
-        /* ─── Groups ─── */
         .groups-section {
           margin-bottom: 24px;
         }
@@ -499,7 +496,6 @@ export default function AttendancePage() {
           cursor: default;
         }
 
-        /* ─── People List ─── */
         .people-section {
           margin-top: 24px;
         }
@@ -610,4 +606,4 @@ export default function AttendancePage() {
       `}</style>
     </Layout>
   );
-}
+        }
