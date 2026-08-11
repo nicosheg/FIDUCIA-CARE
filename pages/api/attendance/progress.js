@@ -30,12 +30,12 @@ export default async function handler(req, res) {
       // Marked present in this session (people in this group)
       let markedQuery;
       if (group.name === 'Everyone') {
-        markedQuery = `SELECT COUNT(DISTINCT ar.member_id) as marked FROM attendance_records ar
-                       JOIN people p ON ar.member_id = p.id
+        markedQuery = `SELECT COUNT(DISTINCT ar.people_id) as marked FROM attendance_records ar
+                       JOIN people p ON ar.people_id = p.id
                        WHERE ar.session_id = $1 AND ar.present = true AND p.organization_id = $2 AND p.status = 'active'`;
       } else {
-        markedQuery = `SELECT COUNT(DISTINCT ar.member_id) as marked FROM attendance_records ar
-                       JOIN people p ON ar.member_id = p.id
+        markedQuery = `SELECT COUNT(DISTINCT ar.people_id) as marked FROM attendance_records ar
+                       JOIN people p ON ar.people_id = p.id
                        WHERE ar.session_id = $1 AND ar.present = true AND p.organization_id = $2 AND p.status = 'active' AND (p.attendance_group_id = $3 OR p.attendance_group_id IS NULL)`;
       }
       const markedRes = await pool.query(markedQuery, group.name === 'Everyone' ? [sessionId, orgId] : [sessionId, orgId, group.id]);
