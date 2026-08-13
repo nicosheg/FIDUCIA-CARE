@@ -349,7 +349,7 @@ export default function CommunityPage() {
   const statusColor = (status) => {
     switch (status) {
       case 'alive': return '#8FB7FF';
-      case 'needs_attention': return '#D4AF37';
+      case 'needs_decision': return '#D4AF37';
       case 'conflict': return '#D4AF37';
       default: return 'rgba(255,255,255,0.4)';
     }
