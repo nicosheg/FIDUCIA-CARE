@@ -2,9 +2,26 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Layout from '../components/Layout';
 import BirthdayPicker from '../components/BirthdayPicker';
-import { ICONS } from '../lib/icons';
 
 const ORG_ID = 'demo-org';
+const ICONS = {
+  visitor: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 4-7 8-7s8 3 8 7" /></svg>),
+  phone: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12" y2="18.01" stroke="currentColor" strokeWidth="3" /></svg>),
+  calendar: (<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>),
+  mail: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M2 7l10 7 10-7" /></svg>),
+  note: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>),
+  importIcon: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>),
+  check: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34D399" strokeWidth="2"><path d="M20 6L9 17l-5-5" /></svg>),
+  trash: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>),
+  prayer: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><path d="M17 14V3a1 1 0 00-1-1H8a1 1 0 00-1 1v11l4 4 6-4z" /><path d="M12 22V8" /></svg>),
+  heart: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" /></svg>),
+  smile: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg>),
+  sick: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><path d="M4 4h16v16H4z" /><line x1="8" y1="8" x2="16" y2="16" /><line x1="16" y1="8" x2="8" y2="16" /></svg>),
+  family: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M2 20c0-4 4-7 10-7 1.5 0 3 .3 4.3.9" /><circle cx="20" cy="18" r="3" /><path d="M20 15v2" /></svg>),
+  work: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>),
+  other: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>),
+};
+
 const isSuspicious = n => n && (n.length > 60 || [/\*\*/, /->/, /Line \d+/, /Let's/, /re-read/, /carefully/, /illegible/, /faint/, /<think>/, /the user wants/, /analyze the image/, /I will/, /^[0-9]+\./, /^[*\-]/].some(p => p.test(n)));
 const getNextBirthday = b => b ? Math.ceil((new Date(new Date(b).setFullYear(new Date().getFullYear())) - new Date()) / (1000*60*60*24)) : null;
 const statusColor = s => ({ alive: '#8FB7FF', needs_decision: '#D4AF37', conflict: '#D4AF37' }[s] || 'rgba(255,255,255,0.4)');
@@ -163,13 +180,12 @@ export default function CommunityPage() {
   if (loading) return <Layout><div style={{ padding: 20 }}>Loading community…</div></Layout>;
 
   const hasReviewItem = (name) => reviewItems.some(item => item.extracted_name === name && !item.resolved);
-
   return (
     <Layout>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
         <h1 style={{ fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 25 }}>{people.length} lives remembered</h1>
 
-        {/* ── Living Truth ── */}
+        {/* Living Truth */}
         <div style={{ marginBottom: 20 }}>
           {reviewStats.total === 0 ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'rgba(255,255,255,0.3)' }}>
@@ -210,7 +226,7 @@ export default function CommunityPage() {
           </div>
         )}
 
-        {/* ── Controls ── */}
+        {/* Controls */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
           <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none' }} />
           <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none', width: 120 }}>
@@ -258,7 +274,59 @@ export default function CommunityPage() {
                     {editBirthday && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>Next birthday in {getNextBirthday(editBirthday)} days</div>}
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={(e) => { e.stopPropagation(); saveEdit(person.id); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Parse & Save</button>
+                    <button onClick={(e) => { e.stopPropagation(); saveEdit(person.id); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
+                    <button onClick={(e) => { e.stopPropagation(); setEditingId(null); cancelSelect(); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.visitor} {person.type || 'visitor'}</span>
+                      {isSuspicious(person.first_name) && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 12, background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>⚠️</span>}
+                      {hasReviewItem(person.first_name) && <span className="living-dot-small" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#8FB7FF', marginLeft: 6, animation: 'pulse 4s ease-in-out infinite' }} />}
+                    </div>
+                  </div>
+                  <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.phone} {person.phone || 'No phone'}</div>
+                  {person.birthday && <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: '#D4AF37', fontSize: 10 }}>●</span> Birthday: {new Date(person.birthday).toLocaleDateString()} <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 10, marginLeft: 4 }}>(in {getNextBirthday(person.birthday)} days)</span></div>}
+                  {person.last_attended_date && <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.calendar} Last attended: {new Date(person.last_attended_date).toLocaleDateString()}</div>}
+                  {person.last_contacted ? <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.mail} Last contacted: {new Date(person.last_contacted).toLocaleDateString()}</div> : <div style={{ color: '#F59E0B', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.mail} Never contacted</div>}
+
+                  {selected?.id === person.id && !selectMode && !editingId && (
+                    <div style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={stopProp}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                        <button onClick={(e) => { e.stopPropagation(); generateDraft(person.id); }} className="fiducia-button fiducia-button-primary" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.mail} Draft & Send WhatsApp</span></button>
+                        <Link href={`/person/${person.id}`} className="fiducia-button fiducia-button-secondary" style={actionBtnStyle}>Journey →</Link>
+                        <button onClick={(e) => { e.stopPropagation(); setAddingNote(true); }} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.note} Add pastoral note</span></button>
+                        <button onClick={(e) => { e.stopPropagation(); setImportingConv(true); }} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.importIcon} Import Conversation</span></button>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={(e) => deletePerson(person.id, e)} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.trash} Remove</span></button>
+                      </div>
+                    </div>
+                  )}
+
+                  {addingNote && selected?.id === person.id && (
+                    <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }} onClick={stopProp}>
+                      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>What happened today?</p>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                        {[{ icon: ICONS.prayer, label: 'Asked for prayer' }, { icon: ICONS.heart, label: 'First-time visitor' }, { icon: ICONS.smile, label: 'Shared good news' }, { icon: ICONS.sick, label: 'Sick or recovering' }, { icon: ICONS.family, label: 'Family situation' }, { icon: ICONS.work, label: 'Work or school' }, { icon: ICONS.other, label: 'Other' }].map(prompt => (<button key={prompt.label} onClick={(e) => { e.stopPropagation(); setNoteText(prompt.label + ': '); }} style={promptBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{prompt.icon} {prompt.label}</span></button>))}
+                      </div>
+                      <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add more details..." rows={3} style={textareaStyle} />
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={(e) => { e.stopPropagation(); saveNote(); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
+                        <button onClick={(e) => { e.stopPropagation(); setAddingNote(false); setNoteText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {importingConv && selected?.id === person.id && (
+                    <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }} onClick={stopProp}>
+                      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>Paste your WhatsApp, SMS, or notes conversation here.</p>
+                      <textarea value={convText} onChange={e => setConvText(e.target.value)} placeholder="Paste conversation..." rows={4} style={textareaStyle} />
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={(e) => { e.stopPropagation(); importConversation(); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Parse & Save</button>
                         <button onClick={(e) => { e.stopPropagation(); setImportingConv(false); setConvText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
                       </div>
                     </div>
