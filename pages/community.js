@@ -31,7 +31,7 @@ export default function CommunityPage() {
   const [filtered, setFiltered] = useState([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
-  const [showSuspicious, setShowSuspicious] = useState(false);
+  const [showLivingTruthOnly, setShowLivingTruthOnly] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -74,13 +74,13 @@ export default function CommunityPage() {
   useEffect(() => {
     let r = [...people];
     if (roleFilter !== 'all') r = r.filter(p => p.type === roleFilter);
-    if (showSuspicious) r = r.filter(p => isSuspicious(p.first_name));
+    if (showLivingTruthOnly) r = r.filter(p => reviewItems.some(item => item.extracted_name === p.first_name && !item.resolved));
     if (search.trim()) {
       const q = search.toLowerCase();
       r = r.filter(p => (p.first_name || '').toLowerCase().includes(q) || (p.phone || '').includes(q));
     }
     setFiltered(r);
-  }, [people, search, roleFilter, showSuspicious]);
+  }, [people, search, roleFilter, showLivingTruthOnly, reviewItems]);
 
   const onPointerDown = useCallback((id) => {
     timer.current = setTimeout(() => { setSelectMode(true); setSelectedIds(prev => new Set(prev).add(id)); if (navigator.vibrate) navigator.vibrate(50); }, 1200);
@@ -232,10 +232,13 @@ export default function CommunityPage() {
           <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none', width: 120 }}>
             <option value="all">All</option><option value="visitor">Visitor</option><option value="member">Member</option>
           </select>
-          <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input type="checkbox" checked={showSuspicious} onChange={() => setShowSuspicious(!showSuspicious)} />
-            Show suspicious/corrupted only <span style={{ fontSize: 11, color: '#EF4444' }}>({people.filter(p => isSuspicious(p.first_name)).length})</span>
-          </label>
+          <button
+            className={`fiducia-button ${showLivingTruthOnly ? 'fiducia-button-primary' : 'fiducia-button-ghost'}`}
+            style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+            onClick={() => setShowLivingTruthOnly(!showLivingTruthOnly)}
+          >
+            {showLivingTruthOnly ? 'All' : 'Living Truth'}
+          </button>
           <button onClick={() => setShowAdd(!showAdd)} className="fiducia-button fiducia-button-primary">Add Person</button>
         </div>
 
@@ -284,7 +287,6 @@ export default function CommunityPage() {
                     <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.visitor} {person.type || 'visitor'}</span>
-                      {isSuspicious(person.first_name) && <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 12, background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>⚠️</span>}
                       {hasReviewItem(person.first_name) && <span className="living-dot-small" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#8FB7FF', marginLeft: 6, animation: 'pulse 4s ease-in-out infinite' }} />}
                     </div>
                   </div>
@@ -365,3 +367,5 @@ const miniInput = { padding: '10px 12px', borderRadius: 10, border: '1px solid r
 const textareaStyle = { width: '100%', padding: 8, borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#fff', resize: 'vertical', outline: 'none', marginBottom: 8 };
 const actionBtnStyle = { padding: '6px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 };
 const promptBtnStyle = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#D4AF37', borderRadius: 8, padding: '6px 12px', fontSize: 12, cursor: 'pointer' };
+const selectBar = { position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', background: 'rgba(10,15,26,0.9)', backdropFilter: 'blur(20px)', borderRadius: 20, padding: '12px 24px', display: 'flex', gap: 16, zIndex: 1001, border: '1px solid rgba(255,255,255,0.06)' };
+const barBtn = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 10, padding: '8px 16px', fontSize: 13, cursor: 'pointer', backdropFilter: 'blur(10px)' };
