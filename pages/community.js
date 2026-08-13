@@ -78,12 +78,37 @@ export default function CommunityPage() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const longPressTimer = useRef(null);
 
+  // ── Living Truth Review State ──
+  const [reviewStats, setReviewStats] = useState({ total: 0, alive: 0, needs_decision: 0, conflict: 0 });
+  const [reviewItems, setReviewItems] = useState([]);
+  const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [scanJobId, setScanJobId] = useState(null);
+
   useEffect(() => { fetchPeople(); }, []);
   const fetchPeople = async () => {
     const res = await fetch(`/api/people?organization_id=${ORG_ID}&_=${Date.now()}`);
     const data = await res.json();
     if (Array.isArray(data)) { setPeople(data); setLoading(false); }
   };
+
+  // ── Fetch review items ──
+  const fetchReviewItems = async () => {
+    try {
+      const res = await fetch(`/api/identity/review-items?organization_id=${ORG_ID}`);
+      const data = await res.json();
+      if (data.stats) {
+        setReviewStats(data.stats);
+        setReviewItems(data.items);
+        setScanJobId(data.scan_job_id);
+      }
+    } catch (err) {
+      console.error('Error fetching review items:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchReviewItems();
+  }, []);
 
   useEffect(() => {
     let result = [...people];
@@ -126,7 +151,7 @@ export default function CommunityPage() {
   const selectAll = () => setSelectedIds(new Set(filtered.map(p => p.id)));
   const cancelSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
 
-  // ========== CREATE ==========
+  // ─── CREATE ───
   const addPerson = async e => {
     e.preventDefault();
     if (!form.full_name.trim()) return;
@@ -139,7 +164,6 @@ export default function CommunityPage() {
           phone: form.phone,
           type: form.type,
           birthday: form.birthday || null,
-          // last_name is intentionally omitted – we use single Full Name
         }),
       });
       const data = await res.json();
@@ -159,7 +183,7 @@ export default function CommunityPage() {
     }
   };
 
-  // ========== UPDATE ==========
+  // ─── UPDATE ───
   const saveEdit = async (personId) => {
     if (!editName.trim()) return;
     try {
@@ -172,7 +196,6 @@ export default function CommunityPage() {
           phone: editPhone,
           type: people.find(p => p.id === personId)?.type || 'visitor',
           birthday: editBirthday || null,
-          // last_name is intentionally omitted – we preserve existing value
         }),
       });
       const data = await res.json();
@@ -192,7 +215,7 @@ export default function CommunityPage() {
     }
   };
 
-  // ========== DELETE (single) ==========
+  // ─── DELETE ───
   const handleDelete = async (personId, e) => {
     if (e) e.stopPropagation();
     if (!confirm('Remove this person? This also removes their attendance, timeline, and care records.')) return;
@@ -218,7 +241,7 @@ export default function CommunityPage() {
     }
   };
 
-  // ========== BULK DELETE ==========
+  // ─── BULK DELETE ───
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`Remove ${selectedIds.size} selected people? This also removes their attendance, timeline, and care records.`)) return;
@@ -247,7 +270,7 @@ export default function CommunityPage() {
     cancelSelectMode();
   };
 
-  // ========== OTHER ACTIONS ==========
+  // ─── OTHER ACTIONS ───
   const generateDraft = async (personId) => {
     const res = await fetch('/api/presence/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: personId }) });
     const data = await res.json();
@@ -289,7 +312,48 @@ export default function CommunityPage() {
 
   const stopProp = (e) => e.stopPropagation();
 
+  // ── Resolve review action ──
+  const resolveReview = async (item, action, targetPersonId = null) => {
+    try {
+      const res = await fetch('/api/identity/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scan_job_id: scanJobId,
+          extracted_name: item.extracted_name,
+          action,
+          target_person_id: targetPersonId,
+        }),
+      });
+      if (res.ok) {
+        // Refresh review items
+        fetchReviewItems();
+        // Also refresh people list (in case new person was added)
+        fetchPeople();
+        setMessage('Resolved successfully.');
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        const err = await res.json();
+        setMessage('Error: ' + err.error);
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch (err) {
+      setMessage('Error resolving.');
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
   if (loading) return <Layout><div style={{ padding:20 }}>Loading community…</div></Layout>;
+
+  // ── Helper to get status color ──
+  const statusColor = (status) => {
+    switch (status) {
+      case 'alive': return '#8FB7FF';
+      case 'needs_attention': return '#D4AF37';
+      case 'conflict': return '#D4AF37';
+      default: return 'rgba(255,255,255,0.4)';
+    }
+  };
   return (
     <Layout>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
@@ -297,27 +361,97 @@ export default function CommunityPage() {
           {people.length} lives remembered
         </h1>
 
-        {selectMode && (
-          <div style={selectBar}>
-            <span style={{ color: '#f0f0f0', fontWeight: 600 }}>{selectedIds.size} selected</span>
-            <button onClick={selectAll} style={barBtn}>Select All</button>
-            {selectedIds.size === 1 && (
-              <button onClick={() => {
-                const id = selectedIds.values().next().value;
-                const person = people.find(p => p.id === id);
-                if (person) {
-                  setEditName(person.first_name || '');
-                  setEditPhone(person.phone || '');
-                  setEditBirthday(person.birthday || '');
-                  setEditingPerson(id);
-                }
-              }} style={barBtn}>Edit</button>
-            )}
-            <button onClick={bulkDelete} style={{ ...barBtn, borderColor: '#EF4444', color: '#EF4444' }}>Delete</button>
-            <button onClick={cancelSelectMode} style={barBtn}>Cancel</button>
+        {/* ── Living Truth Banner ── */}
+        {reviewStats.total > 0 && (
+          <div
+            className="living-truth-banner"
+            onClick={() => setShowReviewPanel(true)}
+            style={{
+              background: 'rgba(143, 183, 255, 0.06)',
+              border: '1px solid rgba(143, 183, 255, 0.15)',
+              borderRadius: '12px',
+              padding: '12px 16px',
+              marginBottom: '20px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+            }}
+          >
+            <div className="living-dot" style={{
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              background: '#8FB7FF',
+              animation: 'pulse 4s ease-in-out infinite',
+            }} />
+            <span style={{ color: '#8FB7FF', fontWeight: 500 }}>
+              Living Truth • {reviewStats.total} identities need attention
+            </span>
+            <span style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem' }}>
+              {reviewStats.alive > 0 && `${reviewStats.alive} alive `}
+              {reviewStats.needs_decision > 0 && `${reviewStats.needs_decision} need decision `}
+              {reviewStats.conflict > 0 && `${reviewStats.conflict} conflict`}
+            </span>
           </div>
         )}
 
+        {/* ── Review Panel ── */}
+        {showReviewPanel && (
+          <div className="review-panel-overlay" onClick={() => setShowReviewPanel(false)}>
+            <div className="review-panel" onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h3 style={{ color: '#f0f0f0', margin: 0 }}>Living Truth</h3>
+                <button onClick={() => setShowReviewPanel(false)} className="fiducia-button fiducia-button-ghost">Close</button>
+              </div>
+              {reviewItems.length === 0 ? (
+                <p style={{ color: 'rgba(255,255,255,0.5)' }}>No unresolved identities.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {reviewItems.map(item => (
+                    <div key={item.extracted_name} className="review-item" style={{
+                      padding: '12px 16px',
+                      background: 'rgba(255,255,255,0.02)',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(255,255,255,0.05)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}>
+                      <div>
+                        <span style={{ color: '#f0f0f0', fontWeight: 500 }}>{item.extracted_name}</span>
+                        {item.extracted_phone && <span style={{ color: 'rgba(255,255,255,0.4)', marginLeft: '8px' }}>{item.extracted_phone}</span>}
+                        <span style={{ marginLeft: '12px', fontSize: '0.8rem', color: statusColor(item.status) }}>
+                          {item.status}
+                        </span>
+                      </div>
+                      <div>
+                        {item.candidate_ids && item.candidate_ids.length > 0 && (
+                          <button
+                            className="fiducia-button fiducia-button-primary"
+                            style={{ padding: '4px 12px', fontSize: '0.8rem' }}
+                            onClick={() => resolveReview(item, 'confirm', item.candidate_ids[0])}
+                          >
+                            Confirm
+                          </button>
+                        )}
+                        <button
+                          className="fiducia-button fiducia-button-secondary"
+                          style={{ padding: '4px 12px', fontSize: '0.8rem', marginLeft: '8px' }}
+                          onClick={() => resolveReview(item, 'keep_new')}
+                        >
+                          Keep as New
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Existing Controls ── */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
           <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)}
             style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none' }} />
@@ -570,6 +704,36 @@ export default function CommunityPage() {
       )}
 
       <style jsx>{`
+        @keyframes pulse {
+          0% { opacity: 0.4; transform: scale(1); }
+          50% { opacity: 1; transform: scale(1.1); }
+          100% { opacity: 0.4; transform: scale(1); }
+        }
+
+        .review-panel-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(0, 0, 0, 0.6);
+          backdrop-filter: blur(8px);
+          z-index: 1000;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .review-panel {
+          background: #141c2b;
+          border-radius: 20px;
+          padding: 24px;
+          max-width: 700px;
+          width: 90%;
+          max-height: 80vh;
+          overflow-y: auto;
+          border: 1px solid rgba(255,255,255,0.05);
+        }
+
         .fiducia-card { background: rgba(20,25,40,0.9); border-radius: 26px; border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 0 10px rgba(212,175,55,0.03); transition: border-color 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease; padding: 24px; margin-bottom: 18px; animation: cardBreathe 20s ease-in-out infinite alternate; }
         @keyframes cardBreathe { 0% { box-shadow: inset 0 0 10px rgba(212,175,55,0.03); } 100% { box-shadow: inset 0 0 14px rgba(212,175,55,0.06); } }
         .fiducia-button { padding: 12px 24px; border-radius: 30px; font-weight: 500; font-size: 15px; cursor: pointer; transition: background 0.2s, box-shadow 0.2s, transform 0.1s; display: inline-block; text-decoration: none; text-align: center; user-select: none; border: 1px solid transparent; }
