@@ -2,54 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Layout from '../components/Layout';
 import BirthdayPicker from '../components/BirthdayPicker';
+import { ICONS } from '../lib/icons';
 
 const ORG_ID = 'demo-org';
-
-// ── Glowing SVG icons (no emojis) ──
-const ICONS = {
-  visitor: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 4-7 8-7s8 3 8 7" /></svg>),
-  phone: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12" y2="18.01" stroke="currentColor" strokeWidth="3" /></svg>),
-  calendar: (<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>),
-  mail: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M2 7l10 7 10-7" /></svg>),
-  note: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z" /></svg>),
-  importIcon: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>),
-  check: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34D399" strokeWidth="2"><path d="M20 6L9 17l-5-5" /></svg>),
-  trash: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>),
-  close: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>),
-  prayer: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><path d="M17 14V3a1 1 0 00-1-1H8a1 1 0 00-1 1v11l4 4 6-4z" /><path d="M12 22V8" /></svg>),
-  heart: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" /></svg>),
-  smile: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" /></svg>),
-  sick: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><path d="M4 4h16v16H4z" /><line x1="8" y1="8" x2="16" y2="16" /><line x1="16" y1="8" x2="8" y2="16" /></svg>),
-  family: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M2 20c0-4 4-7 10-7 1.5 0 3 .3 4.3.9" /><circle cx="20" cy="18" r="3" /><path d="M20 15v2" /></svg>),
-  work: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>),
-  other: (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>),
-};
-
-// ── Suspicious name detection ──
-const SUSPICIOUS_PATTERNS = [
-  /\*\*/, /->/, /Line \d+/, /Let's/, /re-read/, /carefully/,
-  /illegible/, /faint/, /<think>/, /the user wants/,
-  /analyze the image/, /I will/, /^[0-9]+\./, /^[*\-]/
-];
-
-function isSuspicious(name) {
-  if (!name) return false;
-  if (name.length > 60) return true;
-  for (const pat of SUSPICIOUS_PATTERNS) {
-    if (pat.test(name)) return true;
-  }
-  return false;
-}
-
-function getNextBirthday(birthday) {
-  if (!birthday) return null;
-  const today = new Date();
-  const bday = new Date(birthday);
-  bday.setFullYear(today.getFullYear());
-  if (bday < today) bday.setFullYear(today.getFullYear() + 1);
-  const diffTime = bday - today;
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-}
+const isSuspicious = n => n && (n.length > 60 || [/\*\*/, /->/, /Line \d+/, /Let's/, /re-read/, /carefully/, /illegible/, /faint/, /<think>/, /the user wants/, /analyze the image/, /I will/, /^[0-9]+\./, /^[*\-]/].some(p => p.test(n)));
+const getNextBirthday = b => b ? Math.ceil((new Date(new Date(b).setFullYear(new Date().getFullYear())) - new Date()) / (1000*60*60*24)) : null;
+const statusColor = s => ({ alive: '#8FB7FF', needs_decision: '#D4AF37', conflict: '#D4AF37' }[s] || 'rgba(255,255,255,0.4)');
 
 export default function CommunityPage() {
   const [people, setPeople] = useState([]);
@@ -57,391 +15,192 @@ export default function CommunityPage() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [showSuspicious, setShowSuspicious] = useState(false);
-  const [message, setMessage] = useState('');
+  const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
-  const [showAddForm, setShowAddForm] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ full_name: '', phone: '', type: 'visitor', birthday: '' });
-  const [selectedPerson, setSelectedPerson] = useState(null);
+  const [selected, setSelected] = useState(null);
   const [addingNote, setAddingNote] = useState(false);
   const [noteText, setNoteText] = useState('');
-  const [importingConversation, setImportingConversation] = useState(false);
-  const [conversationText, setConversationText] = useState('');
-  const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
+  const [importingConv, setImportingConv] = useState(false);
+  const [convText, setConvText] = useState('');
+  const [showPicker, setShowPicker] = useState(false);
   const [pickerTarget, setPickerTarget] = useState(null);
-
-  const [editingPerson, setEditingPerson] = useState(null);
+  const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editBirthday, setEditBirthday] = useState('');
-
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const longPressTimer = useRef(null);
-
-  // ── Living Truth Review State ──
+  const timer = useRef(null);
   const [reviewStats, setReviewStats] = useState({ total: 0, alive: 0, needs_decision: 0, conflict: 0 });
   const [reviewItems, setReviewItems] = useState([]);
   const [showReviewPanel, setShowReviewPanel] = useState(false);
   const [scanJobId, setScanJobId] = useState(null);
 
-  useEffect(() => { fetchPeople(); }, []);
   const fetchPeople = async () => {
     const res = await fetch(`/api/people?organization_id=${ORG_ID}&_=${Date.now()}`);
     const data = await res.json();
     if (Array.isArray(data)) { setPeople(data); setLoading(false); }
   };
 
-  // ── Fetch review items ──
-  const fetchReviewItems = async () => {
+  const fetchReviews = async () => {
     try {
       const res = await fetch(`/api/identity/review-items?organization_id=${ORG_ID}`);
       const data = await res.json();
-      if (data.stats) {
-        setReviewStats(data.stats);
-        setReviewItems(data.items);
-        setScanJobId(data.scan_job_id);
-      }
-    } catch (err) {
-      console.error('Error fetching review items:', err);
-    }
+      if (data.stats) { setReviewStats(data.stats); setReviewItems(data.items); setScanJobId(data.scan_job_id); }
+    } catch (e) { console.error(e); }
   };
 
-  useEffect(() => {
-    fetchReviewItems();
-  }, []);
+  useEffect(() => { fetchPeople(); fetchReviews(); }, []);
 
   useEffect(() => {
-    let result = [...people];
-    if (roleFilter !== 'all') result = result.filter(p => p.type === roleFilter);
-    if (showSuspicious) result = result.filter(p => isSuspicious(p.first_name));
+    let r = [...people];
+    if (roleFilter !== 'all') r = r.filter(p => p.type === roleFilter);
+    if (showSuspicious) r = r.filter(p => isSuspicious(p.first_name));
     if (search.trim()) {
       const q = search.toLowerCase();
-      result = result.filter(p =>
-        (p.first_name || '').toLowerCase().includes(q) || (p.phone || '').includes(q)
-      );
+      r = r.filter(p => (p.first_name || '').toLowerCase().includes(q) || (p.phone || '').includes(q));
     }
-    setFiltered(result);
+    setFiltered(r);
   }, [people, search, roleFilter, showSuspicious]);
 
-  const onPointerDown = useCallback((personId) => {
-    longPressTimer.current = setTimeout(() => {
-      setSelectMode(true);
-      setSelectedIds(prev => new Set(prev).add(personId));
-      if (navigator.vibrate) navigator.vibrate(50);
-    }, 1200);
+  const onPointerDown = useCallback((id) => {
+    timer.current = setTimeout(() => { setSelectMode(true); setSelectedIds(prev => new Set(prev).add(id)); if (navigator.vibrate) navigator.vibrate(50); }, 1200);
   }, []);
-
-  const onPointerUp = useCallback(() => {
-    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-  }, []);
-
-  const onPointerLeave = useCallback(() => {
-    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-  }, []);
-
-  const toggleSelection = (personId) => {
-    if (!selectMode) return;
-    setSelectedIds(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(personId)) newSet.delete(personId); else newSet.add(personId);
-      return newSet;
-    });
-  };
-
+  const onPointerUp = useCallback(() => { if (timer.current) { clearTimeout(timer.current); timer.current = null; } }, []);
+  const onPointerLeave = onPointerUp;
+  const toggleSelection = (id) => { if (!selectMode) return; setSelectedIds(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; }); };
   const selectAll = () => setSelectedIds(new Set(filtered.map(p => p.id)));
-  const cancelSelectMode = () => { setSelectMode(false); setSelectedIds(new Set()); };
+  const cancelSelect = () => { setSelectMode(false); setSelectedIds(new Set()); };
 
-  // ─── CREATE ───
   const addPerson = async e => {
     e.preventDefault();
     if (!form.full_name.trim()) return;
     try {
-      const res = await fetch('/api/people', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          first_name: form.full_name.trim(),
-          phone: form.phone,
-          type: form.type,
-          birthday: form.birthday || null,
-        }),
-      });
+      const res = await fetch('/api/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ first_name: form.full_name.trim(), phone: form.phone, type: form.type, birthday: form.birthday || null }) });
       const data = await res.json();
-      if (res.ok && data.id) {
-        setPeople(prev => [data, ...prev]);
-        setForm({ full_name: '', phone: '', type: 'visitor', birthday: '' });
-        setShowAddForm(false);
-        setMessage('Person added');
-        setTimeout(() => setMessage(''), 3000);
-      } else {
-        setMessage('Error: ' + (data.error || 'Could not add'));
-        setTimeout(() => setMessage(''), 3000);
-      }
-    } catch (err) {
-      setMessage('Error adding.');
-      setTimeout(() => setMessage(''), 3000);
-    }
+      if (res.ok && data.id) { setPeople(prev => [data, ...prev]); setForm({ full_name: '', phone: '', type: 'visitor', birthday: '' }); setShowAdd(false); setMsg('Person added'); setTimeout(() => setMsg(''), 3000); }
+      else { setMsg('Error: ' + (data.error || 'Could not add')); setTimeout(() => setMsg(''), 3000); }
+    } catch (err) { setMsg('Error adding.'); setTimeout(() => setMsg(''), 3000); }
   };
 
-  // ─── UPDATE ───
-  const saveEdit = async (personId) => {
+  const saveEdit = async (id) => {
     if (!editName.trim()) return;
     try {
-      const res = await fetch('/api/people', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: personId,
-          first_name: editName.trim(),
-          phone: editPhone,
-          type: people.find(p => p.id === personId)?.type || 'visitor',
-          birthday: editBirthday || null,
-        }),
-      });
+      const res = await fetch('/api/people', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, first_name: editName.trim(), phone: editPhone, type: people.find(p => p.id === id)?.type || 'visitor', birthday: editBirthday || null }) });
       const data = await res.json();
-      if (res.ok && data.id) {
-        setPeople(prev => prev.map(p => p.id === personId ? data : p));
-        setMessage('Updated');
-        setTimeout(() => setMessage(''), 3000);
-        setEditingPerson(null);
-        cancelSelectMode();
-      } else {
-        setMessage('Error: ' + (data.error || 'Update failed'));
-        setTimeout(() => setMessage(''), 3000);
-      }
-    } catch (err) {
-      setMessage('Error updating.');
-      setTimeout(() => setMessage(''), 3000);
-    }
+      if (res.ok && data.id) { setPeople(prev => prev.map(p => p.id === id ? data : p)); setMsg('Updated'); setTimeout(() => setMsg(''), 3000); setEditingId(null); cancelSelect(); }
+      else { setMsg('Error: ' + (data.error || 'Update failed')); setTimeout(() => setMsg(''), 3000); }
+    } catch (err) { setMsg('Error updating.'); setTimeout(() => setMsg(''), 3000); }
   };
 
-  // ─── DELETE ───
-  const handleDelete = async (personId, e) => {
+  const deletePerson = async (id, e) => {
     if (e) e.stopPropagation();
-    if (!confirm('Remove this person? This also removes their attendance, timeline, and care records.')) return;
-
+    if (!confirm('Remove this person?')) return;
     try {
-      const res = await fetch('/api/people/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: personId }),
-      });
+      const res = await fetch('/api/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
       const data = await res.json();
-      if (res.ok && data.success && data.deleted > 0) {
-        setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id)));
-        setMessage(`Deleted ${data.deleted} person.`);
-        setTimeout(() => setMessage(''), 3000);
-      } else {
-        setMessage('Error: ' + (data.error || 'Delete failed'));
-        setTimeout(() => setMessage(''), 3000);
-      }
-    } catch (err) {
-      setMessage('Error deleting.');
-      setTimeout(() => setMessage(''), 3000);
-    }
+      if (res.ok && data.success && data.deleted > 0) { setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id))); setMsg(`Deleted ${data.deleted} person.`); setTimeout(() => setMsg(''), 3000); }
+      else { setMsg('Error: ' + (data.error || 'Delete failed')); setTimeout(() => setMsg(''), 3000); }
+    } catch (err) { setMsg('Error deleting.'); setTimeout(() => setMsg(''), 3000); }
   };
 
-  // ─── BULK DELETE ───
   const bulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`Remove ${selectedIds.size} selected people? This also removes their attendance, timeline, and care records.`)) return;
-
+    if (!confirm(`Remove ${selectedIds.size} selected people?`)) return;
     const ids = Array.from(selectedIds);
     try {
-      const res = await fetch('/api/people/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids }),
-      });
+      const res = await fetch('/api/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
       const data = await res.json();
-      if (res.ok && data.success && data.deleted > 0) {
-        setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id)));
-        const notFoundMsg = data.not_found_ids.length > 0 ? ` ${data.not_found_ids.length} not found.` : '';
-        setMessage(`Deleted ${data.deleted} people.${notFoundMsg}`);
-        setTimeout(() => setMessage(''), 3000);
-      } else {
-        setMessage('Error: ' + (data.error || 'Delete failed'));
-        setTimeout(() => setMessage(''), 3000);
-      }
-    } catch (err) {
-      setMessage('Error deleting.');
-      setTimeout(() => setMessage(''), 3000);
-    }
-    cancelSelectMode();
+      if (res.ok && data.success && data.deleted > 0) { setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id))); const notFoundMsg = data.not_found_ids.length > 0 ? ` ${data.not_found_ids.length} not found.` : ''; setMsg(`Deleted ${data.deleted} people.${notFoundMsg}`); setTimeout(() => setMsg(''), 3000); }
+      else { setMsg('Error: ' + (data.error || 'Delete failed')); setTimeout(() => setMsg(''), 3000); }
+    } catch (err) { setMsg('Error deleting.'); setTimeout(() => setMsg(''), 3000); }
+    cancelSelect();
   };
 
-  // ─── OTHER ACTIONS ───
-  const generateDraft = async (personId) => {
-    const res = await fetch('/api/presence/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: personId }) });
+  const generateDraft = async (id) => {
+    const res = await fetch('/api/presence/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: id }) });
     const data = await res.json();
     if (data.message) {
       if (confirm(data.message + '\n\nOpen WhatsApp to send?')) {
-        const person = people.find(p => p.id === personId);
+        const person = people.find(p => p.id === id);
         if (person && person.phone) {
           const phone = person.phone.startsWith('+') ? person.phone.substring(1) : person.phone;
           window.open(`https://wa.me/${phone}?text=${encodeURIComponent(data.message)}`, '_blank');
-          await fetch('/api/timeline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: personId, event_type: 'message_sent', channel: 'whatsapp', description: data.message.substring(0, 100), organization_id: ORG_ID, metadata: { type: 'manual_send' } }) });
-          setMessage('Message opened in WhatsApp');
-          setTimeout(() => setMessage(''), 3000);
+          await fetch('/api/timeline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: id, event_type: 'message_sent', channel: 'whatsapp', description: data.message.substring(0, 100), organization_id: ORG_ID, metadata: { type: 'manual_send' } }) });
+          setMsg('Message opened in WhatsApp'); setTimeout(() => setMsg(''), 3000);
         }
       }
-    } else setMessage('Error: ' + (data.error || 'Draft failed'));
-    setTimeout(() => setMessage(''), 3000);
+    } else { setMsg('Error: ' + (data.error || 'Draft failed')); setTimeout(() => setMsg(''), 3000); }
   };
 
   const saveNote = async () => {
     if (!noteText.trim()) return;
-    await fetch('/api/timeline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: selectedPerson.id, event_type: 'note', channel: 'manual', description: noteText.trim(), organization_id: ORG_ID, metadata: { type: 'pastoral_note' } }) });
-    setNoteText('');
-    setAddingNote(false);
-    setMessage('Note saved');
-    setTimeout(() => setMessage(''), 3000);
+    await fetch('/api/timeline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: selected.id, event_type: 'note', channel: 'manual', description: noteText.trim(), organization_id: ORG_ID, metadata: { type: 'pastoral_note' } }) });
+    setNoteText(''); setAddingNote(false); setMsg('Note saved'); setTimeout(() => setMsg(''), 3000);
   };
 
   const importConversation = async () => {
-    if (!conversationText.trim()) return;
-    const res = await fetch('/api/conversation/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: selectedPerson.id, text: conversationText.trim() }) });
+    if (!convText.trim()) return;
+    const res = await fetch('/api/conversation/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: selected.id, text: convText.trim() }) });
     const data = await res.json();
-    if (data.success) {
-      setConversationText('');
-      setImportingConversation(false);
-      setMessage(`Conversation imported – ${data.extracted} key events extracted`);
-    } else setMessage('Error: ' + (data.error || 'Import failed'));
-    setTimeout(() => setMessage(''), 3000);
+    if (data.success) { setConvText(''); setImportingConv(false); setMsg(`Conversation imported – ${data.extracted} key events extracted`); }
+    else { setMsg('Error: ' + (data.error || 'Import failed')); }
+    setTimeout(() => setMsg(''), 3000);
+  };
+
+  const resolveReview = async (item, action, targetId = null) => {
+    try {
+      const res = await fetch('/api/identity/resolve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scan_job_id: scanJobId, extracted_name: item.extracted_name, action, target_person_id: targetId }) });
+      if (res.ok) { fetchReviews(); fetchPeople(); setMsg('Resolved successfully.'); setTimeout(() => setMsg(''), 3000); }
+      else { const err = await res.json(); setMsg('Error: ' + err.error); setTimeout(() => setMsg(''), 3000); }
+    } catch (err) { setMsg('Error resolving.'); setTimeout(() => setMsg(''), 3000); }
   };
 
   const stopProp = (e) => e.stopPropagation();
 
-  // ── Resolve review action ──
-  const resolveReview = async (item, action, targetPersonId = null) => {
-    try {
-      const res = await fetch('/api/identity/resolve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scan_job_id: scanJobId,
-          extracted_name: item.extracted_name,
-          action,
-          target_person_id: targetPersonId,
-        }),
-      });
-      if (res.ok) {
-        // Refresh review items
-        fetchReviewItems();
-        // Also refresh people list (in case new person was added)
-        fetchPeople();
-        setMessage('Resolved successfully.');
-        setTimeout(() => setMessage(''), 3000);
-      } else {
-        const err = await res.json();
-        setMessage('Error: ' + err.error);
-        setTimeout(() => setMessage(''), 3000);
-      }
-    } catch (err) {
-      setMessage('Error resolving.');
-      setTimeout(() => setMessage(''), 3000);
-    }
-  };
+  if (loading) return <Layout><div style={{ padding: 20 }}>Loading community…</div></Layout>;
 
-  if (loading) return <Layout><div style={{ padding:20 }}>Loading community…</div></Layout>;
+  const hasReviewItem = (name) => reviewItems.some(item => item.extracted_name === name && !item.resolved);
 
-  // ── Helper to get status color ──
-  const statusColor = (status) => {
-    switch (status) {
-      case 'alive': return '#8FB7FF';
-      case 'needs_decision': return '#D4AF37';
-      case 'conflict': return '#D4AF37';
-      default: return 'rgba(255,255,255,0.4)';
-    }
-  };
   return (
     <Layout>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
-        <h1 style={{ fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 25 }}>
-          {people.length} lives remembered
-        </h1>
+        <h1 style={{ fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 25 }}>{people.length} lives remembered</h1>
 
-        {/* ── Living Truth Banner ── */}
-        {reviewStats.total > 0 && (
-          <div
-            className="living-truth-banner"
-            onClick={() => setShowReviewPanel(true)}
-            style={{
-              background: 'rgba(143, 183, 255, 0.06)',
-              border: '1px solid rgba(143, 183, 255, 0.15)',
-              borderRadius: '12px',
-              padding: '12px 16px',
-              marginBottom: '20px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-            }}
-          >
-            <div className="living-dot" style={{
-              width: '10px',
-              height: '10px',
-              borderRadius: '50%',
-              background: '#8FB7FF',
-              animation: 'pulse 4s ease-in-out infinite',
-            }} />
-            <span style={{ color: '#8FB7FF', fontWeight: 500 }}>
-              Living Truth • {reviewStats.total} identities need attention
-            </span>
-            <span style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem' }}>
-              {reviewStats.alive > 0 && `${reviewStats.alive} alive `}
-              {reviewStats.needs_decision > 0 && `${reviewStats.needs_decision} need decision `}
-              {reviewStats.conflict > 0 && `${reviewStats.conflict} conflict`}
-            </span>
-          </div>
-        )}
+        {/* ── Living Truth ── */}
+        <div style={{ marginBottom: 20 }}>
+          {reviewStats.total === 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'rgba(255,255,255,0.3)' }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
+              <span style={{ fontSize: 14 }}>Living Truth · Everything is settled</span>
+            </div>
+          ) : (
+            <div className="living-truth-banner" onClick={() => setShowReviewPanel(true)} style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', padding: '8px 0', borderBottom: '1px solid rgba(143,183,255,0.1)' }}>
+              <div className="living-dot" style={{ width: 8, height: 8, borderRadius: '50%', background: '#8FB7FF', animation: 'pulse 4s ease-in-out infinite' }} />
+              <span style={{ color: '#8FB7FF', fontWeight: 500 }}>Living Truth · {reviewStats.total} identities need attention</span>
+              <span style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem' }}>
+                {reviewStats.alive > 0 && `${reviewStats.alive} alive `}
+                {reviewStats.needs_decision > 0 && `${reviewStats.needs_decision} need decision `}
+                {reviewStats.conflict > 0 && `${reviewStats.conflict} conflict`}
+              </span>
+            </div>
+          )}
+        </div>
 
-        {/* ── Review Panel ── */}
         {showReviewPanel && (
           <div className="review-panel-overlay" onClick={() => setShowReviewPanel(false)}>
             <div className="review-panel" onClick={e => e.stopPropagation()}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h3 style={{ color: '#f0f0f0', margin: 0 }}>Living Truth</h3>
-                <button onClick={() => setShowReviewPanel(false)} className="fiducia-button fiducia-button-ghost">Close</button>
-              </div>
-              {reviewItems.length === 0 ? (
-                <p style={{ color: 'rgba(255,255,255,0.5)' }}>No unresolved identities.</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><h3 style={{ color: '#f0f0f0', margin: 0 }}>Living Truth</h3><button onClick={() => setShowReviewPanel(false)} className="fiducia-button fiducia-button-ghost">Close</button></div>
+              {reviewItems.length === 0 ? <p style={{ color: 'rgba(255,255,255,0.5)' }}>No unresolved identities.</p> : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {reviewItems.map(item => (
-                    <div key={item.extracted_name} className="review-item" style={{
-                      padding: '12px 16px',
-                      background: 'rgba(255,255,255,0.02)',
-                      borderRadius: '8px',
-                      border: '1px solid rgba(255,255,255,0.05)',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}>
+                    <div key={item.extracted_name} className="review-item" style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div><span style={{ color: '#f0f0f0', fontWeight: 500 }}>{item.extracted_name}</span>{item.extracted_phone && <span style={{ color: 'rgba(255,255,255,0.4)', marginLeft: 8 }}>{item.extracted_phone}</span>}<span style={{ marginLeft: 12, fontSize: '0.8rem', color: statusColor(item.status) }}>{item.status}</span></div>
                       <div>
-                        <span style={{ color: '#f0f0f0', fontWeight: 500 }}>{item.extracted_name}</span>
-                        {item.extracted_phone && <span style={{ color: 'rgba(255,255,255,0.4)', marginLeft: '8px' }}>{item.extracted_phone}</span>}
-                        <span style={{ marginLeft: '12px', fontSize: '0.8rem', color: statusColor(item.status) }}>
-                          {item.status}
-                        </span>
-                      </div>
-                      <div>
-                        {item.candidate_ids && item.candidate_ids.length > 0 && (
-                          <button
-                            className="fiducia-button fiducia-button-primary"
-                            style={{ padding: '4px 12px', fontSize: '0.8rem' }}
-                            onClick={() => resolveReview(item, 'confirm', item.candidate_ids[0])}
-                          >
-                            Confirm
-                          </button>
-                        )}
-                        <button
-                          className="fiducia-button fiducia-button-secondary"
-                          style={{ padding: '4px 12px', fontSize: '0.8rem', marginLeft: '8px' }}
-                          onClick={() => resolveReview(item, 'keep_new')}
-                        >
-                          Keep as New
-                        </button>
+                        {item.candidate_ids && item.candidate_ids.length > 0 && <button className="fiducia-button fiducia-button-primary" style={{ padding: '4px 12px', fontSize: '0.8rem' }} onClick={() => resolveReview(item, 'confirm', item.candidate_ids[0])}>Confirm</button>}
+                        <button className="fiducia-button fiducia-button-secondary" style={{ padding: '4px 12px', fontSize: '0.8rem', marginLeft: 8 }} onClick={() => resolveReview(item, 'keep_new')}>Keep as New</button>
                       </div>
                     </div>
                   ))}
@@ -451,232 +210,56 @@ export default function CommunityPage() {
           </div>
         )}
 
-        {/* ── Existing Controls ── */}
+        {/* ── Controls ── */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
-          <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)}
-            style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none' }} />
-          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}
-            style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none', width: 120 }}>
-            <option value="all">All</option>
-            <option value="visitor">Visitor</option>
-            <option value="member">Member</option>
+          <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none' }} />
+          <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none', width: 120 }}>
+            <option value="all">All</option><option value="visitor">Visitor</option><option value="member">Member</option>
           </select>
-
           <label style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
             <input type="checkbox" checked={showSuspicious} onChange={() => setShowSuspicious(!showSuspicious)} />
-            Show suspicious/corrupted only
-            <span style={{ fontSize: 11, color: '#EF4444' }}>
-              ({people.filter(p => isSuspicious(p.first_name)).length})
-            </span>
+            Show suspicious/corrupted only <span style={{ fontSize: 11, color: '#EF4444' }}>({people.filter(p => isSuspicious(p.first_name)).length})</span>
           </label>
-
-          <button onClick={() => setShowAddForm(!showAddForm)} className="fiducia-button fiducia-button-primary">Add Person</button>
+          <button onClick={() => setShowAdd(!showAdd)} className="fiducia-button fiducia-button-primary">Add Person</button>
         </div>
 
-        {showAddForm && (
+        {showAdd && (
           <form onSubmit={addPerson} className="fiducia-card" style={{ padding: 20, marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 10 }}>
             <input placeholder="Full Name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} required style={miniInput} />
             <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={miniInput} />
             <div style={{ marginBottom: 8 }}>
-              <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
-                <span style={{ color: '#D4AF37', marginRight: 6 }}>●</span>
-                Birthday
-                <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginLeft: 6 }}>When should ARIA celebrate?</span>
-              </label>
-              <button
-                type="button"
-                onClick={() => { setPickerTarget('add'); setShowBirthdayPicker(true); }}
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.06)',
-                  background: 'rgba(20,25,40,0.6)',
-                  color: form.birthday ? '#f0f0f0' : 'rgba(255,255,255,0.3)',
-                  fontSize: 15,
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  outline: 'none',
-                }}
-              >
+              <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}><span style={{ color: '#D4AF37', marginRight: 6 }}>●</span> Birthday <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginLeft: 6 }}>When should ARIA celebrate?</span></label>
+              <button type="button" onClick={() => { setPickerTarget('add'); setShowPicker(true); }} style={{ width: '100%', padding: '12px 16px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.6)', color: form.birthday ? '#f0f0f0' : 'rgba(255,255,255,0.3)', fontSize: 15, textAlign: 'left', cursor: 'pointer', outline: 'none' }}>
                 {form.birthday ? new Date(form.birthday).toLocaleDateString() : 'Add birthday'}
               </button>
-              {form.birthday && (
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
-                  Next birthday in {getNextBirthday(form.birthday)} days
-                </div>
-              )}
+              {form.birthday && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>Next birthday in {getNextBirthday(form.birthday)} days</div>}
             </div>
-            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={miniInput}>
-              <option value="visitor">Visitor</option>
-              <option value="member">Member</option>
-            </select>
+            <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} style={miniInput}><option value="visitor">Visitor</option><option value="member">Member</option></select>
             <button type="submit" className="fiducia-button fiducia-button-primary">Save</button>
           </form>
         )}
 
-        {message && (
-          <div className="fiducia-card" style={{ padding: 10, marginBottom: 15, color: '#34D399', textAlign: 'center' }}>{message}</div>
-        )}
+        {msg && <div className="fiducia-card" style={{ padding: 10, marginBottom: 15, color: '#34D399', textAlign: 'center' }}>{msg}</div>}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 20 }}>
           {filtered.map(person => (
-            <div
-              key={person.id}
-              className="fiducia-card"
-              onPointerDown={() => onPointerDown(person.id)}
-              onPointerUp={onPointerUp}
-              onPointerLeave={onPointerLeave}
-              onClick={() => {
-                if (selectMode) toggleSelection(person.id);
-                else if (editingPerson !== person.id) setSelectedPerson(selectedPerson?.id === person.id ? null : person);
-              }}
-              style={{
-                cursor: 'pointer', transition: 'all 0.2s',
-                border: selectedIds.has(person.id) ? '1px solid #D4AF37' : undefined,
-                background: selectedIds.has(person.id) ? 'rgba(212,175,55,0.08)' : undefined,
-                userSelect: 'none', WebkitUserSelect: 'none',
-                position: 'relative',
-              }}
-            >
-              {selectMode && (
-                <div style={{ position: 'absolute', top: 10, right: 10 }}>
-                  {selectedIds.has(person.id) ? ICONS.check : <div style={{ width: 16, height: 16, borderRadius: 4, border: '1px solid rgba(255,255,255,0.3)' }} />}
-                </div>
-              )}
+            <div key={person.id} className="fiducia-card" onPointerDown={() => onPointerDown(person.id)} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave} onClick={() => { if (selectMode) toggleSelection(person.id); else if (editingId !== person.id) setSelected(selected?.id === person.id ? null : person); }} style={{ cursor: 'pointer', transition: 'all 0.2s', border: selectedIds.has(person.id) ? '1px solid #D4AF37' : undefined, background: selectedIds.has(person.id) ? 'rgba(212,175,55,0.08)' : undefined, userSelect: 'none', WebkitUserSelect: 'none', position: 'relative' }}>
+              {selectMode && <div style={{ position: 'absolute', top: 10, right: 10 }}>{selectedIds.has(person.id) ? ICONS.check : <div style={{ width: 16, height: 16, borderRadius: 4, border: '1px solid rgba(255,255,255,0.3)' }} />}</div>}
 
-              {editingPerson === person.id ? (
+              {editingId === person.id ? (
                 <div onClick={stopProp} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <input value={editName} onChange={e => setEditName(e.target.value)} style={miniInput} placeholder="Full Name" />
                   <input value={editPhone} onChange={e => setEditPhone(e.target.value)} style={miniInput} placeholder="Phone" />
                   <div style={{ marginBottom: 8 }}>
-                    <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}>
-                      <span style={{ color: '#D4AF37', marginRight: 6 }}>●</span> Birthday
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => { setPickerTarget('edit'); setShowBirthdayPicker(true); }}
-                      style={{
-                        width: '100%',
-                        padding: '12px 16px',
-                        borderRadius: 10,
-                        border: '1px solid rgba(255,255,255,0.06)',
-                        background: 'rgba(20,25,40,0.6)',
-                        color: editBirthday ? '#f0f0f0' : 'rgba(255,255,255,0.3)',
-                        fontSize: 15,
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        outline: 'none',
-                      }}
-                    >
+                    <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}><span style={{ color: '#D4AF37', marginRight: 6 }}>●</span> Birthday</label>
+                    <button type="button" onClick={() => { setPickerTarget('edit'); setShowPicker(true); }} style={{ width: '100%', padding: '12px 16px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.6)', color: editBirthday ? '#f0f0f0' : 'rgba(255,255,255,0.3)', fontSize: 15, textAlign: 'left', cursor: 'pointer', outline: 'none' }}>
                       {editBirthday ? new Date(editBirthday).toLocaleDateString() : 'Add birthday'}
                     </button>
-                    {editBirthday && (
-                      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
-                        Next birthday in {getNextBirthday(editBirthday)} days
-                      </div>
-                    )}
+                    {editBirthday && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>Next birthday in {getNextBirthday(editBirthday)} days</div>}
                   </div>
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={(e) => { e.stopPropagation(); saveEdit(person.id); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
-                    <button onClick={(e) => { e.stopPropagation(); setEditingPerson(null); cancelSelectMode(); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        {ICONS.visitor} {person.type || 'visitor'}
-                      </span>
-                      {isSuspicious(person.first_name) && (
-                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 12, background: 'rgba(239,68,68,0.15)', color: '#EF4444' }}>⚠️</span>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    {ICONS.phone} {person.phone || 'No phone'}
-                  </div>
-                  {person.birthday && (
-                    <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ color: '#D4AF37', fontSize: 10 }}>●</span>
-                      Birthday: {new Date(person.birthday).toLocaleDateString()}
-                      <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 10, marginLeft: 4 }}>
-                        (in {getNextBirthday(person.birthday)} days)
-                      </span>
-                    </div>
-                  )}
-                  {person.last_attended_date && (
-                    <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      {ICONS.calendar} Last attended: {new Date(person.last_attended_date).toLocaleDateString()}
-                    </div>
-                  )}
-                  {person.last_contacted ? (
-                    <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      {ICONS.mail} Last contacted: {new Date(person.last_contacted).toLocaleDateString()}
-                    </div>
-                  ) : (
-                    <div style={{ color: '#F59E0B', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      {ICONS.mail} Never contacted
-                    </div>
-                  )}
-
-                  {selectedPerson?.id === person.id && !selectMode && !editingPerson && (
-                    <div style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={stopProp}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-                        <button onClick={(e) => { e.stopPropagation(); generateDraft(person.id); }} className="fiducia-button fiducia-button-primary" style={actionBtnStyle}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.mail} Draft & Send WhatsApp</span>
-                        </button>
-                        <Link href={`/person/${person.id}`} className="fiducia-button fiducia-button-secondary" style={actionBtnStyle}>Journey →</Link>
-                        <button onClick={(e) => { e.stopPropagation(); setAddingNote(true); }} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.note} Add pastoral note</span>
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); setImportingConversation(true); }} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.importIcon} Import Conversation</span>
-                        </button>
-                      </div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={(e) => handleDelete(person.id, e)} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.trash} Remove</span>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {addingNote && selectedPerson?.id === person.id && (
-                    <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }} onClick={stopProp}>
-                      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>What happened today?</p>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-                        {[
-                          { icon: ICONS.prayer, label: 'Asked for prayer' },
-                          { icon: ICONS.heart, label: 'First-time visitor' },
-                          { icon: ICONS.smile, label: 'Shared good news' },
-                          { icon: ICONS.sick, label: 'Sick or recovering' },
-                          { icon: ICONS.family, label: 'Family situation' },
-                          { icon: ICONS.work, label: 'Work or school' },
-                          { icon: ICONS.other, label: 'Other' },
-                        ].map(prompt => (
-                          <button key={prompt.label} onClick={(e) => { e.stopPropagation(); setNoteText(prompt.label + ': '); }} style={promptBtnStyle}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{prompt.icon} {prompt.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                      <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add more details..." rows={3} style={textareaStyle} />
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={(e) => { e.stopPropagation(); saveNote(); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
-                        <button onClick={(e) => { e.stopPropagation(); setAddingNote(false); setNoteText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
-                      </div>
-                    </div>
-                  )}
-
-                  {importingConversation && selectedPerson?.id === person.id && (
-                    <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }} onClick={stopProp}>
-                      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>Paste your WhatsApp, SMS, or notes conversation here.</p>
-                      <textarea value={conversationText} onChange={e => setConversationText(e.target.value)} placeholder="Paste conversation..." rows={4} style={textareaStyle} />
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={(e) => { e.stopPropagation(); importConversation(); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Parse & Save</button>
-                        <button onClick={(e) => { e.stopPropagation(); setImportingConversation(false); setConversationText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
+                    <button onClick={(e) => { e.stopPropagation(); saveEdit(person.id); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Parse & Save</button>
+                        <button onClick={(e) => { e.stopPropagation(); setImportingConv(false); setConvText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
                       </div>
                     </div>
                   )}
@@ -687,53 +270,14 @@ export default function CommunityPage() {
         </div>
       </div>
 
-      {showBirthdayPicker && (
-        <BirthdayPicker
-          isOpen={true}
-          value={pickerTarget === 'add' ? form.birthday : editBirthday}
-          onSave={(date) => {
-            if (pickerTarget === 'add') {
-              setForm({ ...form, birthday: date });
-            } else {
-              setEditBirthday(date || '');
-            }
-            setShowBirthdayPicker(false);
-          }}
-          onCancel={() => setShowBirthdayPicker(false)}
-        />
+      {showPicker && (
+        <BirthdayPicker isOpen={true} value={pickerTarget === 'add' ? form.birthday : editBirthday} onSave={(date) => { if (pickerTarget === 'add') { setForm({ ...form, birthday: date }); } else { setEditBirthday(date || ''); } setShowPicker(false); }} onCancel={() => setShowPicker(false)} />
       )}
 
       <style jsx>{`
-        @keyframes pulse {
-          0% { opacity: 0.4; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.1); }
-          100% { opacity: 0.4; transform: scale(1); }
-        }
-
-        .review-panel-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.6);
-          backdrop-filter: blur(8px);
-          z-index: 1000;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .review-panel {
-          background: #141c2b;
-          border-radius: 20px;
-          padding: 24px;
-          max-width: 700px;
-          width: 90%;
-          max-height: 80vh;
-          overflow-y: auto;
-          border: 1px solid rgba(255,255,255,0.05);
-        }
-
+        @keyframes pulse { 0% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 0.4; transform: scale(1); } }
+        .review-panel-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+        .review-panel { background: #141c2b; border-radius: 20px; padding: 24px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; border: 1px solid rgba(255,255,255,0.05); }
         .fiducia-card { background: rgba(20,25,40,0.9); border-radius: 26px; border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 0 10px rgba(212,175,55,0.03); transition: border-color 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease; padding: 24px; margin-bottom: 18px; animation: cardBreathe 20s ease-in-out infinite alternate; }
         @keyframes cardBreathe { 0% { box-shadow: inset 0 0 10px rgba(212,175,55,0.03); } 100% { box-shadow: inset 0 0 14px rgba(212,175,55,0.06); } }
         .fiducia-button { padding: 12px 24px; border-radius: 30px; font-weight: 500; font-size: 15px; cursor: pointer; transition: background 0.2s, box-shadow 0.2s, transform 0.1s; display: inline-block; text-decoration: none; text-align: center; user-select: none; border: 1px solid transparent; }
@@ -749,10 +293,7 @@ export default function CommunityPage() {
   );
 }
 
-// ── Local styles ──
 const miniInput = { padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.6)', color: '#fff', outline: 'none' };
 const textareaStyle = { width: '100%', padding: 8, borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#fff', resize: 'vertical', outline: 'none', marginBottom: 8 };
 const actionBtnStyle = { padding: '6px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 };
 const promptBtnStyle = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#D4AF37', borderRadius: 8, padding: '6px 12px', fontSize: 12, cursor: 'pointer' };
-const selectBar = { position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', background: 'rgba(10,15,26,0.9)', backdropFilter: 'blur(20px)', borderRadius: 20, padding: '12px 24px', display: 'flex', gap: 16, zIndex: 1001, border: '1px solid rgba(255,255,255,0.06)' };
-const barBtn = { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', borderRadius: 10, padding: '8px 16px', fontSize: 13, cursor: 'pointer', backdropFilter: 'blur(10px)' };
