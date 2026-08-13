@@ -24,7 +24,21 @@ const ICONS = {
 
 const isSuspicious = n => n && (n.length > 60 || [/\*\*/, /->/, /Line \d+/, /Let's/, /re-read/, /carefully/, /illegible/, /faint/, /<think>/, /the user wants/, /analyze the image/, /I will/, /^[0-9]+\./, /^[*\-]/].some(p => p.test(n)));
 const getNextBirthday = b => b ? Math.ceil((new Date(new Date(b).setFullYear(new Date().getFullYear())) - new Date()) / (1000*60*60*24)) : null;
-const statusColor = s => ({ alive: '#8FB7FF', needs_decision: '#D4AF37', conflict: '#D4AF37' }[s] || 'rgba(255,255,255,0.4)');
+const statusColor = s => ({ alive: '#8FB7FF', needs_decision: '#D4AF37', conflict: '#D4AF37', canonical: 'rgba(255,255,255,0.2)' }[s] || 'rgba(255,255,255,0.4)');
+
+// ── Loading Skeleton ──
+function LoadingSkeleton() {
+  return (
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
+      <div style={{ height: 36, width: '30%', borderRadius: 8, marginBottom: 25, background: 'rgba(255,255,255,0.04)' }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 20 }}>
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="fiducia-card shimmer" style={{ padding: 24, height: 180 }} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function CommunityPage() {
   const [people, setPeople] = useState([]);
@@ -68,6 +82,15 @@ export default function CommunityPage() {
       if (data.stats) { setReviewStats(data.stats); setReviewItems(data.items); setScanJobId(data.scan_job_id); }
     } catch (e) { console.error(e); }
   };
+
+  // ── Initialize baseline Living Truth ──
+  useEffect(() => {
+    fetch('/api/aria/initialize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ organization_id: ORG_ID }),
+    }).catch(err => console.warn('Baseline initialization failed:', err));
+  }, []);
 
   useEffect(() => { fetchPeople(); fetchReviews(); }, []);
 
@@ -177,10 +200,16 @@ export default function CommunityPage() {
 
   const stopProp = (e) => e.stopPropagation();
 
-  if (loading) return <Layout><div style={{ padding: 20 }}>Loading community…</div></Layout>;
+  if (loading) {
+    return (
+      <Layout>
+        <LoadingSkeleton />
+      </Layout>
+    );
+  }
 
   const hasReviewItem = (name) => reviewItems.some(item => item.extracted_name === name && !item.resolved);
-  return (
+    return (
     <Layout>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
         <h1 style={{ fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 25 }}>{people.length} lives remembered</h1>
@@ -287,7 +316,18 @@ export default function CommunityPage() {
                     <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.visitor} {person.type || 'visitor'}</span>
-                      {hasReviewItem(person.first_name) && <span className="living-dot-small" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#8FB7FF', marginLeft: 6, animation: 'pulse 4s ease-in-out infinite' }} />}
+                      {/* Living Truth dot on card */}
+                      {person.living_truth && (
+                        <span className="living-dot-small" style={{
+                          display: 'inline-block',
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          background: statusColor(person.living_truth.status),
+                          marginLeft: 6,
+                          animation: person.living_truth.status === 'canonical' ? 'none' : 'pulse 4s ease-in-out infinite',
+                        }} />
+                      )}
                     </div>
                   </div>
                   <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.phone} {person.phone || 'No phone'}</div>
@@ -346,6 +386,19 @@ export default function CommunityPage() {
 
       <style jsx>{`
         @keyframes pulse { 0% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.1); } 100% { opacity: 0.4; transform: scale(1); } }
+        .shimmer {
+          background: linear-gradient(110deg,
+            rgba(255,255,255,0.02) 25%,
+            rgba(255,255,255,0.05) 50%,
+            rgba(255,255,255,0.02) 75%
+          );
+          background-size: 200% 100%;
+          animation: shimmer 4s ease-in-out infinite;
+        }
+        @keyframes shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
         .review-panel-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); z-index: 1000; display: flex; align-items: center; justify-content: center; }
         .review-panel { background: #141c2b; border-radius: 20px; padding: 24px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; border: 1px solid rgba(255,255,255,0.05); }
         .fiducia-card { background: rgba(20,25,40,0.9); border-radius: 26px; border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 0 10px rgba(212,175,55,0.03); transition: border-color 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease; padding: 24px; margin-bottom: 18px; animation: cardBreathe 20s ease-in-out infinite alternate; }
