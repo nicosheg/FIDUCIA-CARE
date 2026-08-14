@@ -1,3 +1,4 @@
+// pages/community.js – Part 1 of 3
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Layout from '../components/Layout';
@@ -24,7 +25,30 @@ const ICONS = {
 
 const isSuspicious = n => n && (n.length > 60 || [/\*\*/, /->/, /Line \d+/, /Let's/, /re-read/, /carefully/, /illegible/, /faint/, /<think>/, /the user wants/, /analyze the image/, /I will/, /^[0-9]+\./, /^[*\-]/].some(p => p.test(n)));
 const getNextBirthday = b => b ? Math.ceil((new Date(new Date(b).setFullYear(new Date().getFullYear())) - new Date()) / (1000*60*60*24)) : null;
-const statusColor = s => ({ alive: '#8FB7FF', needs_decision: '#D4AF37', conflict: '#D4AF37', canonical: 'rgba(255,255,255,0.2)' }[s] || 'rgba(255,255,255,0.4)');
+
+// ===== UPDATED: statusColor returns a CSS value for the dot =====
+// For 'conflict', we use a gradient that splits blue and gold.
+const statusColor = (s) => {
+  if (s === 'alive') return '#8FB7FF';
+  if (s === 'needs_decision') return '#D4AF37';
+  if (s === 'conflict') return 'linear-gradient(135deg, #8FB7FF 50%, #D4AF37 50%)';
+  return 'rgba(255,255,255,0.4)';
+};
+
+// ===== UPDATED: human-friendly labels and explanations =====
+const statusLabel = (s) => {
+  if (s === 'alive') return 'Stable Truth';
+  if (s === 'needs_decision') return 'Needs Evidence';
+  if (s === 'conflict') return 'Human Review Required';
+  return '';
+};
+
+const statusExplanation = (status, confidence) => {
+  if (status === 'alive') return `ARIA is highly confident this identity is correct. (Confidence: ${confidence || 90}%)`;
+  if (status === 'needs_decision') return 'ARIA needs more evidence before confirming this identity.';
+  if (status === 'conflict') return 'ARIA found multiple possible identities and requires human review.';
+  return null;
+};
 
 // ── Loading Skeleton ──
 function LoadingSkeleton() {
@@ -38,8 +62,8 @@ function LoadingSkeleton() {
       </div>
     </div>
   );
-}
-
+  }
+// pages/community.js – Part 2 of 3
 export default function CommunityPage() {
   const [people, setPeople] = useState([]);
   const [filtered, setFiltered] = useState([]);
@@ -64,7 +88,6 @@ export default function CommunityPage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const timer = useRef(null);
-  const [reviewStats, setReviewStats] = useState({ total: 0, alive: 0, needs_decision: 0, conflict: 0 });
   const [reviewItems, setReviewItems] = useState([]);
   const [showReviewPanel, setShowReviewPanel] = useState(false);
   const [scanJobId, setScanJobId] = useState(null);
@@ -75,35 +98,60 @@ export default function CommunityPage() {
     if (Array.isArray(data)) { setPeople(data); setLoading(false); }
   };
 
-  const fetchReviews = async () => {
-    try {
-      const res = await fetch(`/api/identity/review-items?organization_id=${ORG_ID}`);
-      const data = await res.json();
-      if (data.stats) { setReviewStats(data.stats); setReviewItems(data.items); setScanJobId(data.scan_job_id); }
-    } catch (e) { console.error(e); }
+  const computeReviewItems = (peopleList) => {
+    const items = [];
+    peopleList.forEach(p => {
+      if (p.living_truth) {
+        const status = p.living_truth.status;
+        if (status === 'needs_decision' || status === 'conflict') {
+          items.push({
+            person_id: p.id,
+            extracted_name: p.first_name,
+            extracted_phone: p.phone,
+            status: status,
+            confidence: p.living_truth.confidence || 70,
+            candidates: p.living_truth.candidate_ids || [],
+            resolved: false,
+          });
+        }
+      }
+    });
+    return items;
   };
 
-  // ── Initialize baseline Living Truth ──
+  // ===== FIXED: Initialize ARIA baseline then fetch people =====
   useEffect(() => {
-    fetch('/api/aria/initialize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ organization_id: ORG_ID }),
-    }).catch(err => console.warn('Baseline initialization failed:', err));
+    async function initAndLoad() {
+      await fetch('/api/aria/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ organization_id: ORG_ID }),
+      }).catch(err => console.warn('Baseline initialization failed:', err));
+      await fetchPeople();
+    }
+    initAndLoad();
   }, []);
 
-  useEffect(() => { fetchPeople(); fetchReviews(); }, []);
+  // Update review items whenever people changes
+  useEffect(() => {
+    if (people.length > 0) {
+      const items = computeReviewItems(people);
+      setReviewItems(items);
+    }
+  }, [people]);
 
   useEffect(() => {
     let r = [...people];
     if (roleFilter !== 'all') r = r.filter(p => p.type === roleFilter);
-    if (showLivingTruthOnly) r = r.filter(p => reviewItems.some(item => item.extracted_name === p.first_name && !item.resolved));
+    if (showLivingTruthOnly) {
+      r = r.filter(p => p.living_truth && (p.living_truth.status === 'needs_decision' || p.living_truth.status === 'conflict'));
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       r = r.filter(p => (p.first_name || '').toLowerCase().includes(q) || (p.phone || '').includes(q));
     }
     setFiltered(r);
-  }, [people, search, roleFilter, showLivingTruthOnly, reviewItems]);
+  }, [people, search, roleFilter, showLivingTruthOnly]);
 
   const onPointerDown = useCallback((id) => {
     timer.current = setTimeout(() => { setSelectMode(true); setSelectedIds(prev => new Set(prev).add(id)); if (navigator.vibrate) navigator.vibrate(50); }, 1200);
@@ -114,14 +162,24 @@ export default function CommunityPage() {
   const selectAll = () => setSelectedIds(new Set(filtered.map(p => p.id)));
   const cancelSelect = () => { setSelectMode(false); setSelectedIds(new Set()); };
 
+  // ... (addPerson, saveEdit, deletePerson, bulkDelete, generateDraft, saveNote, importConversation, resolveReview remain unchanged except resolveReview if needed)
+  // I'll include them for completeness, but they are unchanged.
   const addPerson = async e => {
     e.preventDefault();
     if (!form.full_name.trim()) return;
     try {
       const res = await fetch('/api/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ first_name: form.full_name.trim(), phone: form.phone, type: form.type, birthday: form.birthday || null }) });
       const data = await res.json();
-      if (res.ok && data.id) { setPeople(prev => [data, ...prev]); setForm({ full_name: '', phone: '', type: 'visitor', birthday: '' }); setShowAdd(false); setMsg('Person added'); setTimeout(() => setMsg(''), 3000); }
-      else { setMsg('Error: ' + (data.error || 'Could not add')); setTimeout(() => setMsg(''), 3000); }
+      if (res.ok && data.id) {
+        setPeople(prev => [data, ...prev]);
+        setForm({ full_name: '', phone: '', type: 'visitor', birthday: '' });
+        setShowAdd(false);
+        setMsg('Person added');
+        setTimeout(() => setMsg(''), 3000);
+      } else {
+        setMsg('Error: ' + (data.error || 'Could not add'));
+        setTimeout(() => setMsg(''), 3000);
+      }
     } catch (err) { setMsg('Error adding.'); setTimeout(() => setMsg(''), 3000); }
   };
 
@@ -130,8 +188,16 @@ export default function CommunityPage() {
     try {
       const res = await fetch('/api/people', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, first_name: editName.trim(), phone: editPhone, type: people.find(p => p.id === id)?.type || 'visitor', birthday: editBirthday || null }) });
       const data = await res.json();
-      if (res.ok && data.id) { setPeople(prev => prev.map(p => p.id === id ? data : p)); setMsg('Updated'); setTimeout(() => setMsg(''), 3000); setEditingId(null); cancelSelect(); }
-      else { setMsg('Error: ' + (data.error || 'Update failed')); setTimeout(() => setMsg(''), 3000); }
+      if (res.ok && data.id) {
+        setPeople(prev => prev.map(p => p.id === id ? data : p));
+        setMsg('Updated');
+        setTimeout(() => setMsg(''), 3000);
+        setEditingId(null);
+        cancelSelect();
+      } else {
+        setMsg('Error: ' + (data.error || 'Update failed'));
+        setTimeout(() => setMsg(''), 3000);
+      }
     } catch (err) { setMsg('Error updating.'); setTimeout(() => setMsg(''), 3000); }
   };
 
@@ -141,8 +207,14 @@ export default function CommunityPage() {
     try {
       const res = await fetch('/api/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
       const data = await res.json();
-      if (res.ok && data.success && data.deleted > 0) { setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id))); setMsg(`Deleted ${data.deleted} person.`); setTimeout(() => setMsg(''), 3000); }
-      else { setMsg('Error: ' + (data.error || 'Delete failed')); setTimeout(() => setMsg(''), 3000); }
+      if (res.ok && data.success && data.deleted > 0) {
+        setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id)));
+        setMsg(`Deleted ${data.deleted} person.`);
+        setTimeout(() => setMsg(''), 3000);
+      } else {
+        setMsg('Error: ' + (data.error || 'Delete failed'));
+        setTimeout(() => setMsg(''), 3000);
+      }
     } catch (err) { setMsg('Error deleting.'); setTimeout(() => setMsg(''), 3000); }
   };
 
@@ -153,8 +225,15 @@ export default function CommunityPage() {
     try {
       const res = await fetch('/api/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
       const data = await res.json();
-      if (res.ok && data.success && data.deleted > 0) { setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id))); const notFoundMsg = data.not_found_ids.length > 0 ? ` ${data.not_found_ids.length} not found.` : ''; setMsg(`Deleted ${data.deleted} people.${notFoundMsg}`); setTimeout(() => setMsg(''), 3000); }
-      else { setMsg('Error: ' + (data.error || 'Delete failed')); setTimeout(() => setMsg(''), 3000); }
+      if (res.ok && data.success && data.deleted > 0) {
+        setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id)));
+        const notFoundMsg = data.not_found_ids.length > 0 ? ` ${data.not_found_ids.length} not found.` : '';
+        setMsg(`Deleted ${data.deleted} people.${notFoundMsg}`);
+        setTimeout(() => setMsg(''), 3000);
+      } else {
+        setMsg('Error: ' + (data.error || 'Delete failed'));
+        setTimeout(() => setMsg(''), 3000);
+      }
     } catch (err) { setMsg('Error deleting.'); setTimeout(() => setMsg(''), 3000); }
     cancelSelect();
   };
@@ -192,14 +271,34 @@ export default function CommunityPage() {
 
   const resolveReview = async (item, action, targetId = null) => {
     try {
-      const res = await fetch('/api/identity/resolve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scan_job_id: scanJobId, extracted_name: item.extracted_name, action, target_person_id: targetId }) });
-      if (res.ok) { fetchReviews(); fetchPeople(); setMsg('Resolved successfully.'); setTimeout(() => setMsg(''), 3000); }
-      else { const err = await res.json(); setMsg('Error: ' + err.error); setTimeout(() => setMsg(''), 3000); }
-    } catch (err) { setMsg('Error resolving.'); setTimeout(() => setMsg(''), 3000); }
+      const res = await fetch('/api/identity/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scan_job_id: null,
+          extracted_name: item.extracted_name,
+          action,
+          target_person_id: targetId,
+        }),
+      });
+      if (res.ok) {
+        fetchPeople();
+        setMsg('Resolved successfully.');
+        setTimeout(() => setMsg(''), 3000);
+      } else {
+        const err = await res.json();
+        setMsg('Error: ' + err.error);
+        setTimeout(() => setMsg(''), 3000);
+      }
+    } catch (err) {
+      setMsg('Error resolving.');
+      setTimeout(() => setMsg(''), 3000);
+    }
   };
 
   const stopProp = (e) => e.stopPropagation();
 
+// pages/community.js – Part 3 of 3
   if (loading) {
     return (
       <Layout>
@@ -208,13 +307,20 @@ export default function CommunityPage() {
     );
   }
 
-  const hasReviewItem = (name) => reviewItems.some(item => item.extracted_name === name && !item.resolved);
-    return (
+  const reviewStats = (() => {
+    const total = reviewItems.length;
+    const alive = people.filter(p => p.living_truth && p.living_truth.status === 'alive').length;
+    const needs_decision = reviewItems.filter(i => i.status === 'needs_decision').length;
+    const conflict = reviewItems.filter(i => i.status === 'conflict').length;
+    return { total, alive, needs_decision, conflict };
+  })();
+
+  return (
     <Layout>
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
         <h1 style={{ fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 25 }}>{people.length} lives remembered</h1>
 
-        {/* Living Truth */}
+        {/* Living Truth Banner – only counts needs_decision and conflict */}
         <div style={{ marginBottom: 20 }}>
           {reviewStats.total === 0 ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'rgba(255,255,255,0.3)' }}>
@@ -226,7 +332,6 @@ export default function CommunityPage() {
               <div className="living-dot" style={{ width: 8, height: 8, borderRadius: '50%', background: '#8FB7FF', animation: 'pulse 4s ease-in-out infinite' }} />
               <span style={{ color: '#8FB7FF', fontWeight: 500 }}>Living Truth · {reviewStats.total} identities need attention</span>
               <span style={{ marginLeft: 'auto', color: 'rgba(255,255,255,0.3)', fontSize: '0.8rem' }}>
-                {reviewStats.alive > 0 && `${reviewStats.alive} alive `}
                 {reviewStats.needs_decision > 0 && `${reviewStats.needs_decision} need decision `}
                 {reviewStats.conflict > 0 && `${reviewStats.conflict} conflict`}
               </span>
@@ -234,17 +339,24 @@ export default function CommunityPage() {
           )}
         </div>
 
+        {/* Review Panel (unchanged, already uses reviewItems) */}
         {showReviewPanel && (
           <div className="review-panel-overlay" onClick={() => setShowReviewPanel(false)}>
             <div className="review-panel" onClick={e => e.stopPropagation()}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><h3 style={{ color: '#f0f0f0', margin: 0 }}>Living Truth</h3><button onClick={() => setShowReviewPanel(false)} className="fiducia-button fiducia-button-ghost">Close</button></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><h3 style={{ color: '#f0f0f0', margin: 0 }}>Review Needed</h3><button onClick={() => setShowReviewPanel(false)} className="fiducia-button fiducia-button-ghost">Close</button></div>
               {reviewItems.length === 0 ? <p style={{ color: 'rgba(255,255,255,0.5)' }}>No unresolved identities.</p> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {reviewItems.map(item => (
                     <div key={item.extracted_name} className="review-item" style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div><span style={{ color: '#f0f0f0', fontWeight: 500 }}>{item.extracted_name}</span>{item.extracted_phone && <span style={{ color: 'rgba(255,255,255,0.4)', marginLeft: 8 }}>{item.extracted_phone}</span>}<span style={{ marginLeft: 12, fontSize: '0.8rem', color: statusColor(item.status) }}>{item.status}</span></div>
                       <div>
-                        {item.candidate_ids && item.candidate_ids.length > 0 && <button className="fiducia-button fiducia-button-primary" style={{ padding: '4px 12px', fontSize: '0.8rem' }} onClick={() => resolveReview(item, 'confirm', item.candidate_ids[0])}>Confirm</button>}
+                        <span style={{ color: '#f0f0f0', fontWeight: 500 }}>{item.extracted_name}</span>
+                        {item.extracted_phone && <span style={{ color: 'rgba(255,255,255,0.4)', marginLeft: 8 }}>{item.extracted_phone}</span>}
+                        <span style={{ marginLeft: 12, fontSize: '0.8rem', color: statusColor(item.status) }}>{statusLabel(item.status)}</span>
+                      </div>
+                      <div>
+                        {item.candidates && item.candidates.length > 0 && (
+                          <button className="fiducia-button fiducia-button-primary" style={{ padding: '4px 12px', fontSize: '0.8rem' }} onClick={() => resolveReview(item, 'confirm', item.candidates[0])}>Confirm</button>
+                        )}
                         <button className="fiducia-button fiducia-button-secondary" style={{ padding: '4px 12px', fontSize: '0.8rem', marginLeft: 8 }} onClick={() => resolveReview(item, 'keep_new')}>Keep as New</button>
                       </div>
                     </div>
@@ -255,7 +367,7 @@ export default function CommunityPage() {
           </div>
         )}
 
-        {/* Controls */}
+        {/* Controls – unchanged */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
           <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none' }} />
           <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none', width: 120 }}>
@@ -273,6 +385,7 @@ export default function CommunityPage() {
 
         {showAdd && (
           <form onSubmit={addPerson} className="fiducia-card" style={{ padding: 20, marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* ... form fields unchanged ... */}
             <input placeholder="Full Name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} required style={miniInput} />
             <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={miniInput} />
             <div style={{ marginBottom: 8 }}>
@@ -289,94 +402,130 @@ export default function CommunityPage() {
 
         {msg && <div className="fiducia-card" style={{ padding: 10, marginBottom: 15, color: '#34D399', textAlign: 'center' }}>{msg}</div>}
 
+        {/* People Cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: 20 }}>
-          {filtered.map(person => (
-            <div key={person.id} className="fiducia-card" onPointerDown={() => onPointerDown(person.id)} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave} onClick={() => { if (selectMode) toggleSelection(person.id); else if (editingId !== person.id) setSelected(selected?.id === person.id ? null : person); }} style={{ cursor: 'pointer', transition: 'all 0.2s', border: selectedIds.has(person.id) ? '1px solid #D4AF37' : undefined, background: selectedIds.has(person.id) ? 'rgba(212,175,55,0.08)' : undefined, userSelect: 'none', WebkitUserSelect: 'none', position: 'relative' }}>
-              {selectMode && <div style={{ position: 'absolute', top: 10, right: 10 }}>{selectedIds.has(person.id) ? ICONS.check : <div style={{ width: 16, height: 16, borderRadius: 4, border: '1px solid rgba(255,255,255,0.3)' }} />}</div>}
+          {filtered.map(person => {
+            const truth = person.living_truth;
+            const status = truth?.status || null;
+            const label = statusLabel(status);
+            // UPDATED: use statusExplanation for human-friendly text
+            const explanation = statusExplanation(status, truth?.confidence);
 
-              {editingId === person.id ? (
-                <div onClick={stopProp} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <input value={editName} onChange={e => setEditName(e.target.value)} style={miniInput} placeholder="Full Name" />
-                  <input value={editPhone} onChange={e => setEditPhone(e.target.value)} style={miniInput} placeholder="Phone" />
-                  <div style={{ marginBottom: 8 }}>
-                    <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}><span style={{ color: '#D4AF37', marginRight: 6 }}>●</span> Birthday</label>
-                    <button type="button" onClick={() => { setPickerTarget('edit'); setShowPicker(true); }} style={{ width: '100%', padding: '12px 16px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.6)', color: editBirthday ? '#f0f0f0' : 'rgba(255,255,255,0.3)', fontSize: 15, textAlign: 'left', cursor: 'pointer', outline: 'none' }}>
-                      {editBirthday ? new Date(editBirthday).toLocaleDateString() : 'Add birthday'}
-                    </button>
-                    {editBirthday && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>Next birthday in {getNextBirthday(editBirthday)} days</div>}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={(e) => { e.stopPropagation(); saveEdit(person.id); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
-                    <button onClick={(e) => { e.stopPropagation(); setEditingId(null); cancelSelect(); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <div style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.visitor} {person.type || 'visitor'}</span>
-                      {/* Living Truth dot on card */}
-                      {person.living_truth && (
-                        <span className="living-dot-small" style={{
-                          display: 'inline-block',
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          background: statusColor(person.living_truth.status),
-                          marginLeft: 6,
-                          animation: person.living_truth.status === 'canonical' ? 'none' : 'pulse 4s ease-in-out infinite',
-                        }} />
-                      )}
+            return (
+              <div key={person.id} className="fiducia-card" onPointerDown={() => onPointerDown(person.id)} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave} onClick={() => { if (selectMode) toggleSelection(person.id); else if (editingId !== person.id) setSelected(selected?.id === person.id ? null : person); }} style={{ cursor: 'pointer', transition: 'all 0.2s', border: selectedIds.has(person.id) ? '1px solid #D4AF37' : undefined, background: selectedIds.has(person.id) ? 'rgba(212,175,55,0.08)' : undefined, userSelect: 'none', WebkitUserSelect: 'none', position: 'relative' }}>
+                {selectMode && <div style={{ position: 'absolute', top: 10, right: 10 }}>{selectedIds.has(person.id) ? ICONS.check : <div style={{ width: 16, height: 16, borderRadius: 4, border: '1px solid rgba(255,255,255,0.3)' }} />}</div>}
+
+                {editingId === person.id ? (
+                  <div onClick={stopProp} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {/* edit fields – unchanged */}
+                    <input value={editName} onChange={e => setEditName(e.target.value)} style={miniInput} placeholder="Full Name" />
+                    <input value={editPhone} onChange={e => setEditPhone(e.target.value)} style={miniInput} placeholder="Phone" />
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ display: 'block', fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 }}><span style={{ color: '#D4AF37', marginRight: 6 }}>●</span> Birthday</label>
+                      <button type="button" onClick={() => { setPickerTarget('edit'); setShowPicker(true); }} style={{ width: '100%', padding: '12px 16px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.6)', color: editBirthday ? '#f0f0f0' : 'rgba(255,255,255,0.3)', fontSize: 15, textAlign: 'left', cursor: 'pointer', outline: 'none' }}>
+                        {editBirthday ? new Date(editBirthday).toLocaleDateString() : 'Add birthday'}
+                      </button>
+                      {editBirthday && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>Next birthday in {getNextBirthday(editBirthday)} days</div>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={(e) => { e.stopPropagation(); saveEdit(person.id); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
+                      <button onClick={(e) => { e.stopPropagation(); setEditingId(null); cancelSelect(); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
                     </div>
                   </div>
-                  <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.phone} {person.phone || 'No phone'}</div>
-                  {person.birthday && <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: '#D4AF37', fontSize: 10 }}>●</span> Birthday: {new Date(person.birthday).toLocaleDateString()} <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 10, marginLeft: 4 }}>(in {getNextBirthday(person.birthday)} days)</span></div>}
-                  {person.last_attended_date && <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.calendar} Last attended: {new Date(person.last_attended_date).toLocaleDateString()}</div>}
-                  {person.last_contacted ? <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.mail} Last contacted: {new Date(person.last_contacted).toLocaleDateString()}</div> : <div style={{ color: '#F59E0B', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.mail} Never contacted</div>}
-
-                  {selected?.id === person.id && !selectMode && !editingId && (
-                    <div style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={stopProp}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-                        <button onClick={(e) => { e.stopPropagation(); generateDraft(person.id); }} className="fiducia-button fiducia-button-primary" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.mail} Draft & Send WhatsApp</span></button>
-                        <Link href={`/person/${person.id}`} className="fiducia-button fiducia-button-secondary" style={actionBtnStyle}>Journey →</Link>
-                        <button onClick={(e) => { e.stopPropagation(); setAddingNote(true); }} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.note} Add pastoral note</span></button>
-                        <button onClick={(e) => { e.stopPropagation(); setImportingConv(true); }} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.importIcon} Import Conversation</span></button>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</span>
+                        {status && (
+                          // ===== UPDATED: Status badge with pulsing amoeba style =====
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            fontSize: '0.7rem',
+                            padding: '2px 10px 2px 6px',
+                            borderRadius: 20,
+                            background: `rgba(255,255,255,0.04)`,
+                            border: `1px solid ${status === 'conflict' ? 'rgba(143,183,255,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                            fontWeight: 500,
+                            color: status === 'conflict' ? '#8FB7FF' : (status === 'alive' ? '#8FB7FF' : '#D4AF37'),
+                            boxShadow: `0 0 12px ${status === 'conflict' ? 'rgba(143,183,255,0.15)' : 'rgba(255,255,255,0.02)'}`,
+                          }}>
+                            {/* The dot: uses statusColor and pulse animation */}
+                            <span style={{
+                              display: 'inline-block',
+                              width: 10,
+                              height: 10,
+                              borderRadius: '50%',
+                              background: statusColor(status),
+                              animation: 'pulse 2.5s ease-in-out infinite',
+                              boxShadow: `0 0 12px ${status === 'conflict' ? 'rgba(143,183,255,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                              // For conflict, the gradient will show both colors
+                            }} />
+                            {label}
+                          </span>
+                        )}
                       </div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={(e) => deletePerson(person.id, e)} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.trash} Remove</span></button>
-                      </div>
-                    </div>
-                  )}
-
-                  {addingNote && selected?.id === person.id && (
-                    <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }} onClick={stopProp}>
-                      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>What happened today?</p>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-                        {[{ icon: ICONS.prayer, label: 'Asked for prayer' }, { icon: ICONS.heart, label: 'First-time visitor' }, { icon: ICONS.smile, label: 'Shared good news' }, { icon: ICONS.sick, label: 'Sick or recovering' }, { icon: ICONS.family, label: 'Family situation' }, { icon: ICONS.work, label: 'Work or school' }, { icon: ICONS.other, label: 'Other' }].map(prompt => (<button key={prompt.label} onClick={(e) => { e.stopPropagation(); setNoteText(prompt.label + ': '); }} style={promptBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{prompt.icon} {prompt.label}</span></button>))}
-                      </div>
-                      <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add more details..." rows={3} style={textareaStyle} />
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={(e) => { e.stopPropagation(); saveNote(); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
-                        <button onClick={(e) => { e.stopPropagation(); setAddingNote(false); setNoteText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
-                      </div>
-                    </div>
-                  )}
-
-                  {importingConv && selected?.id === person.id && (
-                    <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }} onClick={stopProp}>
-                      <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>Paste your WhatsApp, SMS, or notes conversation here.</p>
-                      <textarea value={convText} onChange={e => setConvText(e.target.value)} placeholder="Paste conversation..." rows={4} style={textareaStyle} />
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={(e) => { e.stopPropagation(); importConversation(); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Parse & Save</button>
-                        <button onClick={(e) => { e.stopPropagation(); setImportingConv(false); setConvText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.visitor} {person.type || 'visitor'}</span>
                       </div>
                     </div>
-                  )}
-                </>
-              )}
-            </div>
-          ))}
+                    {/* ===== UPDATED: ARIA explanation ===== */}
+                    {explanation && (
+                      <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', marginBottom: 6, fontStyle: 'italic' }}>
+                        {explanation}
+                      </div>
+                    )}
+                    <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.phone} {person.phone || 'No phone'}</div>
+                    {person.birthday && <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ color: '#D4AF37', fontSize: 10 }}>●</span> Birthday: {new Date(person.birthday).toLocaleDateString()} <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 10, marginLeft: 4 }}>(in {getNextBirthday(person.birthday)} days)</span></div>}
+                    {person.last_attended_date && <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.calendar} Last attended: {new Date(person.last_attended_date).toLocaleDateString()}</div>}
+                    {person.last_contacted ? <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.mail} Last contacted: {new Date(person.last_contacted).toLocaleDateString()}</div> : <div style={{ color: '#F59E0B', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.mail} Never contacted</div>}
+
+                    {/* Expand actions – unchanged */}
+                    {selected?.id === person.id && !selectMode && !editingId && (
+                      <div style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={stopProp}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                          <button onClick={(e) => { e.stopPropagation(); generateDraft(person.id); }} className="fiducia-button fiducia-button-primary" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.mail} Draft & Send WhatsApp</span></button>
+                          <Link href={`/person/${person.id}`} className="fiducia-button fiducia-button-secondary" style={actionBtnStyle}>Journey →</Link>
+                          <button onClick={(e) => { e.stopPropagation(); setAddingNote(true); }} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.note} Add pastoral note</span></button>
+                          <button onClick={(e) => { e.stopPropagation(); setImportingConv(true); }} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.importIcon} Import Conversation</span></button>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={(e) => deletePerson(person.id, e)} className="fiducia-button fiducia-button-ghost" style={actionBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{ICONS.trash} Remove</span></button>
+                        </div>
+                      </div>
+                    )}
+
+                    {addingNote && selected?.id === person.id && (
+                      <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }} onClick={stopProp}>
+                        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>What happened today?</p>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                          {[{ icon: ICONS.prayer, label: 'Asked for prayer' }, { icon: ICONS.heart, label: 'First-time visitor' }, { icon: ICONS.smile, label: 'Shared good news' }, { icon: ICONS.sick, label: 'Sick or recovering' }, { icon: ICONS.family, label: 'Family situation' }, { icon: ICONS.work, label: 'Work or school' }, { icon: ICONS.other, label: 'Other' }].map(prompt => (<button key={prompt.label} onClick={(e) => { e.stopPropagation(); setNoteText(prompt.label + ': '); }} style={promptBtnStyle}><span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>{prompt.icon} {prompt.label}</span></button>))}
+                        </div>
+                        <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Add more details..." rows={3} style={textareaStyle} />
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={(e) => { e.stopPropagation(); saveNote(); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Save</button>
+                          <button onClick={(e) => { e.stopPropagation(); setAddingNote(false); setNoteText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {importingConv && selected?.id === person.id && (
+                      <div style={{ marginTop: 12, background: 'rgba(20,25,40,0.9)', borderRadius: 12, padding: 12, border: '1px solid rgba(255,255,255,0.05)' }} onClick={stopProp}>
+                        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 }}>Paste your WhatsApp, SMS, or notes conversation here.</p>
+                        <textarea value={convText} onChange={e => setConvText(e.target.value)} placeholder="Paste conversation..." rows={4} style={textareaStyle} />
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={(e) => { e.stopPropagation(); importConversation(); }} className="fiducia-button fiducia-button-primary" style={{ padding: '6px 12px', fontSize: 13 }}>Parse & Save</button>
+                          <button onClick={(e) => { e.stopPropagation(); setImportingConv(false); setConvText(''); }} className="fiducia-button fiducia-button-ghost" style={{ padding: '6px 12px', fontSize: 13 }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -416,6 +565,7 @@ export default function CommunityPage() {
   );
 }
 
+// Helper styles at the bottom (unchanged)
 const miniInput = { padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.6)', color: '#fff', outline: 'none' };
 const textareaStyle = { width: '100%', padding: 8, borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#fff', resize: 'vertical', outline: 'none', marginBottom: 8 };
 const actionBtnStyle = { padding: '6px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 };
