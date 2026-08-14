@@ -9,14 +9,10 @@ export default async function handler(req, res) {
   const orgId = req.body?.organization_id || req.query?.organization_id || 'demo-org';
 
   try {
-    const result = await initializeCommunity(orgId);
-    return res.status(200).json({
-      success: true,
-      initialized: result?.initialized || 0,
-      skipped: result?.skipped || false,
-    });
+    await initializeCommunity(orgId);
+    return res.status(200).json({ success: true });
   } catch (err) {
     console.error('Initialize API error:', err);
     return res.status(500).json({ error: err.message });
   }
-      }
+}
