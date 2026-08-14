@@ -41,12 +41,20 @@ export default async function handler(req, res) {
 
     const normalizedPhone = normalizePhone(phone);
 
+    // ===== ADDED: default living_truth for new people =====
+    const defaultLivingTruth = JSON.stringify({
+      status: 'alive',
+      confidence: 90,
+      reason: 'Initial creation',
+      version: 1
+    });
+
     try {
       const result = await pool.query(
-        `INSERT INTO people (organization_id, first_name, last_name, phone, email, type, birthday)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO people (organization_id, first_name, last_name, phone, email, type, birthday, living_truth)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *`,
-        [orgId, first_name, last_name || '', normalizedPhone || null, email || '', type || 'visitor', birthday || null]
+        [orgId, first_name, last_name || '', normalizedPhone || null, email || '', type || 'visitor', birthday || null, defaultLivingTruth]
       );
       return res.status(200).json(result.rows[0]);
     } catch (err) {
@@ -124,4 +132,4 @@ export default async function handler(req, res) {
   }
 
   res.status(405).end();
-        }
+    }
