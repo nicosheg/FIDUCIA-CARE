@@ -12,8 +12,8 @@ export default async function handler(req, res) {
     const result = await initializeCommunity(orgId);
     return res.status(200).json({
       success: true,
-      initialized: result.initialized,
-      skipped: result.skipped || false,
+      initialized: result?.initialized || 0,
+      skipped: result?.skipped || false,
     });
   } catch (err) {
     console.error('Initialize API error:', err);
