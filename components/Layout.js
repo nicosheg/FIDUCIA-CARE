@@ -29,6 +29,9 @@ export default function Layout({ children }) {
         <Link href="/community" className={router.pathname === '/community' ? 'navLink active' : 'navLink'}>
           Community
         </Link>
+        <Link href="/review-center" className={router.pathname === '/review-center' ? 'navLink active' : 'navLink'}>
+          Review Center
+        </Link>
         <Link href="/church-profile" className={router.pathname === '/church-profile' ? 'navLink active' : 'navLink'}>
           Church Profile
         </Link>
