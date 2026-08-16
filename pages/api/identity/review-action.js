@@ -1,37 +1,36 @@
 // pages/api/identity/review-action.js
 import pool from '../../../lib/db';
 
-/**
- * Merge strategy:
- * - Survivor = person_id (the one being acted upon)
- * - Move all data from matched_person_id to survivor:
- *   - attendance_records (people_id)
- *   - timeline_events (people_id)
- *   - person_aliases (person_id)
- *   - any other related tables
- * - Mark matched_person_id as status = 'merged'
- * - Update both living_truth with resolution info
- * - Store audit in aria_learning
- */
+const MIN_MERGE_SCORE = 70; // safety threshold
+
 async function mergePeople(client, survivorId, mergedId, orgId, resolvedBy, action, evidence, reasons, score, ariaDecision) {
-  // 1. Update all foreign keys to point to survivor
+  // 1. Verify both are active and not already merged
+  const check = await client.query(
+    `SELECT status, living_truth FROM people WHERE id = ANY($1) AND organization_id = $2`,
+    [[survivorId, mergedId], orgId]
+  );
+  if (check.rows.length !== 2) throw new Error('One or both persons not found');
+  for (const row of check.rows) {
+    if (row.status === 'merged') throw new Error(`Person ${row.id} is already merged`);
+    if (row.living_truth?.merged_into) throw new Error(`Person ${row.id} is already merged`);
+  }
+
+  // 2. Move foreign keys
   await client.query(
-    `UPDATE attendance_records SET people_id = $1 WHERE people_id = $2 AND organization_id = $3`,
+    `UPDATE participation_records SET person_id = $1 WHERE person_id = $2 AND organization_id = $3`,
     [survivorId, mergedId, orgId]
   );
   await client.query(
-    `UPDATE timeline_events SET people_id = $1 WHERE people_id = $2 AND organization_id = $3`,
+    `UPDATE timeline_events SET person_id = $1 WHERE person_id = $2 AND organization_id = $3`,
     [survivorId, mergedId, orgId]
   );
   await client.query(
     `UPDATE person_aliases SET person_id = $1 WHERE person_id = $2 AND organization_id = $3`,
     [survivorId, mergedId, orgId]
   );
-  // Add more tables as needed (e.g., care_queue, etc.)
+  // Add more tables as needed
 
-  // 2. Merge aliases (optional, but we already moved them)
-
-  // 3. Mark merged person as inactive/merged
+  // 3. Mark merged person
   await client.query(
     `UPDATE people SET status = 'merged', merged_into_id = $1 WHERE id = $2 AND organization_id = $3`,
     [survivorId, mergedId, orgId]
@@ -53,7 +52,7 @@ async function mergePeople(client, survivorId, mergedId, orgId, resolvedBy, acti
     [survivorTruth, survivorId, orgId]
   );
 
-  // 5. Update merged person living_truth (keep a reference)
+  // 5. Update merged person living_truth
   const mergedTruth = {
     status: 'merged',
     merged_into: survivorId,
@@ -70,7 +69,16 @@ async function mergePeople(client, survivorId, mergedId, orgId, resolvedBy, acti
 }
 
 async function keepSeparate(client, personId, matchedId, orgId, resolvedBy, action, evidence, reasons, score, ariaDecision) {
-  // Just mark both as alive, clear review, but keep a record of human decision
+  // Ensure both are active
+  const check = await client.query(
+    `SELECT status FROM people WHERE id = ANY($1) AND organization_id = $2`,
+    [[personId, matchedId], orgId]
+  );
+  if (check.rows.length !== 2) throw new Error('One or both persons not found');
+  for (const row of check.rows) {
+    if (row.status === 'merged') throw new Error(`Person ${row.id} is already merged`);
+  }
+
   const keepTruth = (id, otherId) => ({
     status: 'alive',
     confidence: 100,
@@ -79,7 +87,6 @@ async function keepSeparate(client, personId, matchedId, orgId, resolvedBy, acti
     resolved_by: resolvedBy,
     action_taken: action,
     source: 'human_resolved',
-    // Optionally keep reference to the other
     reviewed_with: otherId,
   });
 
@@ -113,30 +120,54 @@ export default async function handler(req, res) {
 
     // Fetch current living_truth for both
     const personRes = await client.query(
-      `SELECT living_truth FROM people WHERE id = $1 AND organization_id = $2`,
+      `SELECT living_truth, status FROM people WHERE id = $1 AND organization_id = $2`,
       [person_id, orgId]
     );
     const matchedRes = await client.query(
-      `SELECT living_truth FROM people WHERE id = $1 AND organization_id = $2`,
+      `SELECT living_truth, status FROM people WHERE id = $1 AND organization_id = $2`,
       [matched_person_id, orgId]
     );
-    const personLT = personRes.rows[0]?.living_truth;
-    const matchedLT = matchedRes.rows[0]?.living_truth;
-    if (!personLT || !matchedLT) {
+    if (personRes.rows.length === 0 || matchedRes.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Person not found' });
     }
+    const personLT = personRes.rows[0].living_truth;
+    const matchedLT = matchedRes.rows[0].living_truth;
+    const personStatus = personRes.rows[0].status;
+    const matchedStatus = matchedRes.rows[0].status;
 
-    // Extract review info (from person)
-    const review = personLT.review || {};
+    // Safety: cannot merge if either is already merged
+    if (personStatus === 'merged' || matchedStatus === 'merged') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'One of the persons is already merged' });
+    }
+
+    // Extract review info
+    const review = personLT?.review || matchedLT?.review || {};
     const score = review.score || 0;
     const reasons = review.reasons || [];
     const evidence = review.evidence || [];
-    const ariaDecision = personLT.status || 'needs_decision';
+    const ariaDecision = personLT?.status || 'needs_decision';
 
-    // Store audit in aria_learning (before modifying)
+    // ---- SAFETY CHECKS ----
+    // 1. If action is merge, require minimum score
+    if (action === 'merge') {
+      if (score < MIN_MERGE_SCORE) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          error: `Merge blocked: confidence score (${score}) below minimum (${MIN_MERGE_SCORE}). Please review manually.`
+        });
+      }
+      // 2. Require at least one evidence type
+      if (reasons.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Merge blocked: no evidence provided. Cannot merge without evidence.' });
+      }
+    }
+
+    // Store learning record (audit)
     await client.query(
-      `INSERT INTO aria_learning 
+      `INSERT INTO aria_learning
        (organization_id, source_person_id, candidate_person_id, aria_score, aria_decision, human_decision, reviewed_at, resolved_by, evidence, reasons)
        VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9)`,
       [orgId, person_id, matched_person_id, score, ariaDecision, action, resolver, JSON.stringify(evidence), JSON.stringify(reasons)]
@@ -149,6 +180,50 @@ export default async function handler(req, res) {
       await keepSeparate(client, person_id, matched_person_id, orgId, resolver, action, evidence, reasons, score, ariaDecision);
     }
 
+    // ---- Resolution Engine: Record outcome and close case ----
+    // We'll call the resolution engine inside the transaction
+    // to record the outcome and close any open engagement case.
+
+    // 1. Record outcome
+    const outcomeType = action === 'merge' ? 'merged' : 'kept_separate';
+    await client.query(
+      `INSERT INTO engagement_outcomes (organization_id, person_id, outcome_type, outcome_score)
+       VALUES ($1, $2, $3, $4)`,
+      [orgId, person_id, outcomeType, score]
+    );
+    // Also record for the matched person (as a reference)
+    await client.query(
+      `INSERT INTO engagement_outcomes (organization_id, person_id, outcome_type, outcome_score)
+       VALUES ($1, $2, $3, $4)`,
+      [orgId, matched_person_id, outcomeType, score]
+    );
+
+    // 2. Close any open engagement cases for both persons
+    await client.query(
+      `UPDATE engagement_cases SET resolved = true, updated_at = NOW()
+       WHERE person_id = ANY($1) AND organization_id = $2 AND resolved = false`,
+      [[person_id, matched_person_id], orgId]
+    );
+
+    // 3. If merge, also close any recommendations related to these persons
+    await client.query(
+      `UPDATE recommendations SET status = 'completed', updated_at = NOW()
+       WHERE person_id = ANY($1) AND organization_id = $2 AND status = 'pending'`,
+      [[person_id, matched_person_id], orgId]
+    );
+
+    // 4. If merge, we also want to create a journey event
+    await client.query(
+      `INSERT INTO person_journey_events (organization_id, person_id, event_type, event_data)
+       VALUES ($1, $2, 'IDENTITY_MERGED', $3)`,
+      [orgId, person_id, JSON.stringify({ merged_with: matched_person_id, score })]
+    );
+    await client.query(
+      `INSERT INTO person_journey_events (organization_id, person_id, event_type, event_data)
+       VALUES ($1, $2, 'IDENTITY_MERGED_INTO', $3)`,
+      [orgId, matched_person_id, JSON.stringify({ merged_into: person_id, score })]
+    );
+
     await client.query('COMMIT');
     res.status(200).json({ success: true, action });
   } catch (err) {
@@ -158,4 +233,4 @@ export default async function handler(req, res) {
   } finally {
     client.release();
   }
-     }
+}
