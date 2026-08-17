@@ -1,5 +1,5 @@
 // pages/api/attendance/mark.js
-import pool from '../../lib/db';
+import pool from '../../../lib/db';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -47,4 +47,4 @@ export default async function handler(req, res) {
   } finally {
     client.release();
   }
-}
+       }
