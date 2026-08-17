@@ -1,3 +1,4 @@
+// pages/care-queue.js
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 
@@ -20,17 +21,14 @@ export default function CareQueue() {
     }
   };
 
-  // "ARIA Scan" – triggers a fresh intelligence scan
   const runAriaScan = async () => {
     setScanning(true);
     try {
-      // POST to the same API with a flag to regenerate intelligence
       await fetch('/api/care-queue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'scan' }),
       });
-      // Then re-fetch the updated queue
       await fetchQueue();
     } catch (e) {
       console.error(e);
@@ -42,6 +40,13 @@ export default function CareQueue() {
   useEffect(() => {
     fetchQueue();
   }, []);
+
+  const riskColor = (risk) => {
+    if (risk === 'critical') return '#EF4444';
+    if (risk === 'high') return '#F59E0B';
+    if (risk === 'medium') return '#FBBF24';
+    return '#34D399';
+  };
 
   if (loading) {
     return (
@@ -87,9 +92,18 @@ export default function CareQueue() {
             {items.map((item, idx) => (
               <div key={idx} className="fiducia-card" style={{ padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <p className="aria-speaks" style={{ margin: 0, fontSize: 17 }}>{item.text}</p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{
+                      display: 'inline-block',
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: riskColor(item.risk_level),
+                    }} />
+                    <p className="aria-speaks" style={{ margin: 0, fontSize: 17 }}>{item.text}</p>
+                  </div>
                   <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>
-                    {item.priority === 'high' ? 'High priority' : 'Medium priority'}
+                    {item.engagement_status} · {item.inactivity_streak} weeks inactive
                   </p>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
@@ -100,7 +114,6 @@ export default function CareQueue() {
                       const phone = item.phone || '';
                       if (phone) {
                         const clean = phone.startsWith('+') ? phone.substring(1) : phone;
-                        // ARIA drafts a warm message
                         const message = encodeURIComponent(
                           `Hello ${item.first_name || ''}, just checking in – ARIA wanted me to see how you're doing.`
                         );
@@ -127,4 +140,4 @@ export default function CareQueue() {
       </div>
     </Layout>
   );
-                    }
+  }
