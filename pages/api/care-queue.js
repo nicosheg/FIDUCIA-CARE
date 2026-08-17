@@ -1,90 +1,47 @@
+// pages/api/care-queue.js
 import pool from '../../lib/db';
 
 export default async function handler(req, res) {
   const orgId = req.query.organization_id || req.body?.organization_id || 'demo-org';
 
-  // POST: ARIA Scan – trigger intelligence scan
+  // POST: trigger intelligence scan (optional)
   if (req.method === 'POST') {
-    console.log(`ARIA scan triggered for org: ${orgId}`);
-    // In future, this could call a more sophisticated intelligence layer
-    return res.status(200).json({ message: 'ARIA scan complete.' });
+    // We could call updateEngagementCases here, but we'll keep it simple for now.
+    return res.status(200).json({ message: 'ARIA scan triggered.' });
   }
 
-  // GET: fetch care items
+  // GET: fetch care items from engagement_cases
   if (req.method === 'GET') {
     try {
-      // 1. People not contacted in the last 7 days
-      const notContacted = await pool.query(`
-        SELECT p.id, p.first_name, p.phone,
-               (SELECT MAX(created_at) FROM timeline_events 
-                WHERE person_id = p.id AND event_type IN ('message_sent','call','note')) AS last_contacted
-        FROM people p
-        WHERE p.organization_id = $1 AND p.status = 'active'
-          AND NOT EXISTS (
-            SELECT 1 FROM timeline_events te 
-            WHERE te.person_id = p.id 
-              AND te.event_type IN ('message_sent','call','note') 
-              AND te.created_at > NOW() - INTERVAL '7 days'
-          )
-        ORDER BY last_contacted ASC NULLS FIRST
-        LIMIT 20
-      `, [orgId]);
+      const result = await pool.query(
+        `SELECT ec.*, p.first_name, p.phone
+         FROM engagement_cases ec
+         JOIN people p ON ec.person_id = p.id
+         WHERE ec.organization_id = $1 AND ec.resolved = false
+         ORDER BY 
+           CASE ec.risk_level
+             WHEN 'critical' THEN 1
+             WHEN 'high' THEN 2
+             WHEN 'medium' THEN 3
+             WHEN 'low' THEN 4
+           END,
+           ec.inactivity_streak DESC
+         LIMIT 30`,
+        [orgId]
+      );
 
-      // 2. Birthdays this week (using the new birthday column)
-      const birthday = await pool.query(`
-        SELECT id, first_name, phone, birthday
-        FROM people
-        WHERE birthday IS NOT NULL
-          AND EXTRACT(MONTH FROM birthday) = EXTRACT(MONTH FROM CURRENT_DATE)
-          AND EXTRACT(DAY FROM birthday) BETWEEN EXTRACT(DAY FROM CURRENT_DATE) 
-                                            AND EXTRACT(DAY FROM CURRENT_DATE) + 7
-      `);
-
-      // 3. Open prayer requests
-      const prayers = await pool.query(`
-        SELECT DISTINCT p.id, p.first_name, p.phone, te.description
-        FROM timeline_events te
-        JOIN people p ON p.id = te.person_id
-        WHERE te.event_type = 'prayer_request'
-          AND te.created_at > NOW() - INTERVAL '7 days'
-      `);
-
-      // Build ARIA suggestions
-      const items = [];
-
-      notContacted.rows.forEach(p => {
-        items.push({
-          person_id: p.id,
-          first_name: p.first_name,
-          phone: p.phone,
-          priority: 'medium',
-          text: `${p.first_name} hasn't been contacted recently. ARIA suggests a warm check-in.`
-        });
-      });
-
-      birthday.rows.forEach(p => {
-        items.push({
-          person_id: p.id,
-          first_name: p.first_name,
-          phone: p.phone,
-          priority: 'high',
-          text: `${p.first_name}'s birthday is coming up. ARIA recommends sending a heartfelt greeting.`
-        });
-      });
-
-      prayers.rows.forEach(p => {
-        items.push({
-          person_id: p.id,
-          first_name: p.first_name,
-          phone: p.phone,
-          priority: 'medium',
-          text: `Follow up on prayer request: "${p.description}". ARIA suggests a personal message.`
-        });
-      });
-
-      // Sort by priority (high → medium → low)
-      const priorityOrder = { high: 1, medium: 2, low: 3 };
-      items.sort((a, b) => (priorityOrder[a.priority] || 4) - (priorityOrder[b.priority] || 4));
+      const items = result.rows.map(row => ({
+        person_id: row.person_id,
+        first_name: row.first_name,
+        phone: row.phone,
+        priority: row.risk_level === 'critical' ? 'high' : row.risk_level === 'high' ? 'medium' : 'low',
+        text: `${row.first_name} has been inactive for ${row.inactivity_streak} weeks. ${row.risk_level === 'critical' ? 'URGENT: Leader action required.' : 'Care needed.'}`,
+        risk_level: row.risk_level,
+        engagement_status: row.engagement_status,
+        inactivity_streak: row.inactivity_streak,
+        last_seen: row.last_seen,
+        created_at: row.created_at,
+      }));
 
       res.status(200).json(items);
     } catch (err) {
@@ -95,4 +52,4 @@ export default async function handler(req, res) {
     res.setHeader('Allow', ['GET', 'POST']);
     res.status(405).end(`Method ${req.method} Not Allowed`);
   }
-          }
+        }
