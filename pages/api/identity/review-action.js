@@ -15,15 +15,18 @@ async function mergePeople(client, survivorId, mergedId, orgId, resolvedBy, acti
     if (row.living_truth?.merged_into) throw new Error(`Person ${row.id} is already merged`);
   }
 
-  // 2. Move foreign keys
+  // 2. Move foreign keys – use the correct column names
+  // participation_records uses person_id (created with that name)
   await client.query(
     `UPDATE participation_records SET person_id = $1 WHERE person_id = $2 AND organization_id = $3`,
     [survivorId, mergedId, orgId]
   );
+  // timeline_events uses people_id (not person_id)
   await client.query(
-    `UPDATE timeline_events SET person_id = $1 WHERE person_id = $2 AND organization_id = $3`,
+    `UPDATE timeline_events SET people_id = $1 WHERE people_id = $2 AND organization_id = $3`,
     [survivorId, mergedId, orgId]
   );
+  // person_aliases uses person_id
   await client.query(
     `UPDATE person_aliases SET person_id = $1 WHERE person_id = $2 AND organization_id = $3`,
     [survivorId, mergedId, orgId]
@@ -150,7 +153,6 @@ export default async function handler(req, res) {
     const ariaDecision = personLT?.status || 'needs_decision';
 
     // ---- SAFETY CHECKS ----
-    // 1. If action is merge, require minimum score
     if (action === 'merge') {
       if (score < MIN_MERGE_SCORE) {
         await client.query('ROLLBACK');
@@ -158,14 +160,13 @@ export default async function handler(req, res) {
           error: `Merge blocked: confidence score (${score}) below minimum (${MIN_MERGE_SCORE}). Please review manually.`
         });
       }
-      // 2. Require at least one evidence type
       if (reasons.length === 0) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: 'Merge blocked: no evidence provided. Cannot merge without evidence.' });
       }
     }
 
-    // Store learning record (audit)
+    // ---- Store learning record (audit) ----
     await client.query(
       `INSERT INTO aria_learning
        (organization_id, source_person_id, candidate_person_id, aria_score, aria_decision, human_decision, reviewed_at, resolved_by, evidence, reasons)
@@ -173,46 +174,45 @@ export default async function handler(req, res) {
       [orgId, person_id, matched_person_id, score, ariaDecision, action, resolver, JSON.stringify(evidence), JSON.stringify(reasons)]
     );
 
-    // Perform action
+    // ---- Perform action ----
     if (action === 'merge') {
       await mergePeople(client, person_id, matched_person_id, orgId, resolver, action, evidence, reasons, score, ariaDecision);
     } else {
       await keepSeparate(client, person_id, matched_person_id, orgId, resolver, action, evidence, reasons, score, ariaDecision);
     }
 
-    // ---- Resolution Engine: Record outcome and close case ----
-    // We'll call the resolution engine inside the transaction
-    // to record the outcome and close any open engagement case.
-
-    // 1. Record outcome
-    const outcomeType = action === 'merge' ? 'merged' : 'kept_separate';
-    await client.query(
-      `INSERT INTO engagement_outcomes (organization_id, person_id, outcome_type, outcome_score)
-       VALUES ($1, $2, $3, $4)`,
-      [orgId, person_id, outcomeType, score]
-    );
-    // Also record for the matched person (as a reference)
-    await client.query(
-      `INSERT INTO engagement_outcomes (organization_id, person_id, outcome_type, outcome_score)
-       VALUES ($1, $2, $3, $4)`,
-      [orgId, matched_person_id, outcomeType, score]
-    );
-
-    // 2. Close any open engagement cases for both persons
+    // ---- Resolution: Close engagement cases ----
     await client.query(
       `UPDATE engagement_cases SET resolved = true, updated_at = NOW()
        WHERE person_id = ANY($1) AND organization_id = $2 AND resolved = false`,
       [[person_id, matched_person_id], orgId]
     );
 
-    // 3. If merge, also close any recommendations related to these persons
+    // ---- ⚠️ TEMPORARILY DISABLED: tables missing ----
+    // The following tables are not yet created in the database.
+    // They will be re-enabled once the schema is updated.
+
+    /*
+    // Record outcome
+    await client.query(
+      `INSERT INTO engagement_outcomes (organization_id, person_id, outcome_type, outcome_score)
+       VALUES ($1, $2, $3, $4)`,
+      [orgId, person_id, action === 'merge' ? 'merged' : 'kept_separate', score]
+    );
+    await client.query(
+      `INSERT INTO engagement_outcomes (organization_id, person_id, outcome_type, outcome_score)
+       VALUES ($1, $2, $3, $4)`,
+      [orgId, matched_person_id, action === 'merge' ? 'merged' : 'kept_separate', score]
+    );
+
+    // Close recommendations
     await client.query(
       `UPDATE recommendations SET status = 'completed', updated_at = NOW()
        WHERE person_id = ANY($1) AND organization_id = $2 AND status = 'pending'`,
       [[person_id, matched_person_id], orgId]
     );
 
-    // 4. If merge, we also want to create a journey event
+    // Create journey events
     await client.query(
       `INSERT INTO person_journey_events (organization_id, person_id, event_type, event_data)
        VALUES ($1, $2, 'IDENTITY_MERGED', $3)`,
@@ -223,6 +223,7 @@ export default async function handler(req, res) {
        VALUES ($1, $2, 'IDENTITY_MERGED_INTO', $3)`,
       [orgId, matched_person_id, JSON.stringify({ merged_into: person_id, score })]
     );
+    */
 
     await client.query('COMMIT');
     res.status(200).json({ success: true, action });
