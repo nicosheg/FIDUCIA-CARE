@@ -4,44 +4,37 @@ import pool from '../../../lib/db';
 const MIN_MERGE_SCORE = 70; // safety threshold
 
 async function mergePeople(client, survivorId, mergedId, orgId, resolvedBy, action, evidence, reasons, score, ariaDecision) {
-  // 1. Verify both are active and not already merged
+  // 1. Verify both are active and not already merged (based on living_truth)
   const check = await client.query(
     `SELECT status, living_truth FROM people WHERE id = ANY($1) AND organization_id = $2`,
     [[survivorId, mergedId], orgId]
   );
   if (check.rows.length !== 2) throw new Error('One or both persons not found');
   for (const row of check.rows) {
-    if (row.status === 'merged') throw new Error(`Person ${row.id} is already merged`);
+    if (row.status === 'deleted') throw new Error(`Person ${row.id} is deleted`);
     if (row.living_truth?.merged_into) throw new Error(`Person ${row.id} is already merged`);
   }
 
-  // 2. Move foreign keys – use the correct column names
-  // participation_records uses person_id (created with that name)
+  // 2. Move foreign keys
   await client.query(
     `UPDATE participation_records SET person_id = $1 WHERE person_id = $2 AND organization_id = $3`,
     [survivorId, mergedId, orgId]
   );
-  // timeline_events uses people_id (not person_id)
   await client.query(
     `UPDATE timeline_events SET people_id = $1 WHERE people_id = $2 AND organization_id = $3`,
     [survivorId, mergedId, orgId]
   );
-  // person_aliases uses person_id
   await client.query(
     `UPDATE person_aliases SET person_id = $1 WHERE person_id = $2 AND organization_id = $3`,
     [survivorId, mergedId, orgId]
   );
-  // Add more tables as needed
 
-  // 3. Mark merged person
-  await client.query(
-    `UPDATE people SET status = 'merged', merged_into_id = $1 WHERE id = $2 AND organization_id = $3`,
-    [survivorId, mergedId, orgId]
-  );
+  // 3. Do NOT change people.status – keep it 'active' or whatever it was.
+  // The merge state is stored in living_truth.
 
   // 4. Update survivor living_truth
   const survivorTruth = {
-    status: 'alive',
+    status: 'alive', // or maybe keep existing status? keep 'alive' for clarity
     confidence: 100,
     resolved_by_human: true,
     resolved_at: new Date().toISOString(),
@@ -57,7 +50,7 @@ async function mergePeople(client, survivorId, mergedId, orgId, resolvedBy, acti
 
   // 5. Update merged person living_truth
   const mergedTruth = {
-    status: 'merged',
+    status: 'merged', // this is the living_truth status, not people.status
     merged_into: survivorId,
     resolved_by_human: true,
     resolved_at: new Date().toISOString(),
@@ -79,7 +72,7 @@ async function keepSeparate(client, personId, matchedId, orgId, resolvedBy, acti
   );
   if (check.rows.length !== 2) throw new Error('One or both persons not found');
   for (const row of check.rows) {
-    if (row.status === 'merged') throw new Error(`Person ${row.id} is already merged`);
+    if (row.status === 'deleted') throw new Error(`Person ${row.id} is deleted`);
   }
 
   const keepTruth = (id, otherId) => ({
@@ -139,10 +132,14 @@ export default async function handler(req, res) {
     const personStatus = personRes.rows[0].status;
     const matchedStatus = matchedRes.rows[0].status;
 
-    // Safety: cannot merge if either is already merged
-    if (personStatus === 'merged' || matchedStatus === 'merged') {
+    // Safety: cannot merge if either is already merged (based on living_truth)
+    if (personLT?.merged_into || matchedLT?.merged_into) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'One of the persons is already merged' });
+    }
+    if (personStatus === 'deleted' || matchedStatus === 'deleted') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'One of the persons is deleted' });
     }
 
     // Extract review info
@@ -189,9 +186,6 @@ export default async function handler(req, res) {
     );
 
     // ---- ⚠️ TEMPORARILY DISABLED: tables missing ----
-    // The following tables are not yet created in the database.
-    // They will be re-enabled once the schema is updated.
-
     /*
     // Record outcome
     await client.query(
@@ -199,30 +193,7 @@ export default async function handler(req, res) {
        VALUES ($1, $2, $3, $4)`,
       [orgId, person_id, action === 'merge' ? 'merged' : 'kept_separate', score]
     );
-    await client.query(
-      `INSERT INTO engagement_outcomes (organization_id, person_id, outcome_type, outcome_score)
-       VALUES ($1, $2, $3, $4)`,
-      [orgId, matched_person_id, action === 'merge' ? 'merged' : 'kept_separate', score]
-    );
-
-    // Close recommendations
-    await client.query(
-      `UPDATE recommendations SET status = 'completed', updated_at = NOW()
-       WHERE person_id = ANY($1) AND organization_id = $2 AND status = 'pending'`,
-      [[person_id, matched_person_id], orgId]
-    );
-
-    // Create journey events
-    await client.query(
-      `INSERT INTO person_journey_events (organization_id, person_id, event_type, event_data)
-       VALUES ($1, $2, 'IDENTITY_MERGED', $3)`,
-      [orgId, person_id, JSON.stringify({ merged_with: matched_person_id, score })]
-    );
-    await client.query(
-      `INSERT INTO person_journey_events (organization_id, person_id, event_type, event_data)
-       VALUES ($1, $2, 'IDENTITY_MERGED_INTO', $3)`,
-      [orgId, matched_person_id, JSON.stringify({ merged_into: person_id, score })]
-    );
+    // ... etc
     */
 
     await client.query('COMMIT');
@@ -234,4 +205,4 @@ export default async function handler(req, res) {
   } finally {
     client.release();
   }
-}
+    }
