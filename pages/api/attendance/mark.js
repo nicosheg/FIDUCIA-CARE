@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   if (!session_id || !people_id) return res.status(400).json({ error: 'Missing session_id or people_id' });
 
   const today = new Date().toISOString().slice(0, 10);
-  const orgId = req.body.organization_id || 'demo-org'; // fallback
+  const orgId = req.body.organization_id || 'demo-org';
 
   const client = await pool.connect();
   try {
@@ -22,13 +22,19 @@ export default async function handler(req, res) {
       [people_id, today, present ? true : false, session_id]
     );
 
-    // 2. Insert into participation_records (for ARIA intelligence)
-    await client.query(
-      `INSERT INTO participation_records (organization_id, person_id, participation_date, present, created_at)
-       VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT (person_id, participation_date) DO NOTHING`,
-      [orgId, people_id, today, present ? true : false]
+    // 2. Insert into participation_records (only if not already present for this day)
+    const existing = await client.query(
+      `SELECT 1 FROM participation_records
+       WHERE person_id = $1 AND participation_date = $2 AND organization_id = $3`,
+      [people_id, today, orgId]
     );
+    if (existing.rows.length === 0) {
+      await client.query(
+        `INSERT INTO participation_records (organization_id, person_id, participation_date, present, created_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [orgId, people_id, today, present ? true : false]
+      );
+    }
 
     // 3. Log user mark (if provided)
     if (user_id) {
@@ -47,4 +53,4 @@ export default async function handler(req, res) {
   } finally {
     client.release();
   }
-       }
+        }
