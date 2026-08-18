@@ -15,7 +15,7 @@ export default function ARIAHome() {
       try {
         const [briefRes, prioRes, feedRes, recRes] = await Promise.all([
           fetch(`/api/daily-briefing/latest?organization_id=${orgId}`),
-          fetch(`/api/priority-queue?organization_id=${orgId}&limit=5`),
+          fetch(`/api/priority-queue?organization_id=${orgId}&limit=10`),
           fetch(`/api/brain-feed?organization_id=${orgId}&limit=10`),
           fetch(`/api/recommendations?organization_id=${orgId}`),
         ]);
@@ -59,17 +59,24 @@ export default function ARIAHome() {
         </p>
 
         {/* Priority Queue */}
-        {priority.length > 0 && (
+        {priority.length > 0 ? (
           <div style={{ marginBottom: 32 }}>
             <h2 style={{ fontSize: 20, fontWeight: 500, color: '#f0f0f0', marginBottom: 12 }}>Top Priority</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {priority.slice(0, 5).map((p, idx) => (
+              {priority.slice(0, 10).map((p, idx) => (
                 <div key={idx} className="fiducia-card" style={{ padding: '12px 20px', marginBottom: 0 }}>
                   <span style={{ color: '#f0f0f0', fontWeight: 500 }}>{p.first_name}</span>
                   <span style={{ color: 'rgba(255,255,255,0.3)', marginLeft: 8 }}>• Score: {p.priority_score}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.2)', marginLeft: 8, fontSize: 12 }}>
+                    {p.living_truth_status || 'active'}
+                  </span>
                 </div>
               ))}
             </div>
+          </div>
+        ) : (
+          <div style={{ marginBottom: 32 }}>
+            <p style={{ color: 'rgba(255,255,255,0.3)' }}>No priority signals yet.</p>
           </div>
         )}
 
@@ -120,4 +127,4 @@ export default function ARIAHome() {
       </div>
     </Layout>
   );
-          }
+}
