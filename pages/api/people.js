@@ -18,12 +18,14 @@ export default async function handler(req, res) {
                 AND te.event_type IN ('message_sent','call','note','aria_draft')) AS last_contacted
       FROM people p
       WHERE p.organization_id = $1
+        AND p.status != 'deleted'
+        AND (p.living_truth IS NULL OR p.living_truth->>'status' != 'merged')
     `;
 
     const deletedClause = " AND p.status != 'deleted'";
     const finalQuery = includeDeleted
       ? baseQuery + ' ORDER BY p.created_at DESC'
-      : baseQuery + deletedClause + ' ORDER BY p.created_at DESC';
+      : baseQuery + ' ORDER BY p.created_at DESC';
 
     try {
       const { rows } = await pool.query(finalQuery, [orgId]);
@@ -40,13 +42,11 @@ export default async function handler(req, res) {
     if (!first_name) return res.status(400).json({ error: 'first_name is required' });
 
     const normalizedPhone = normalizePhone(phone);
-
-    // ===== ADDED: default living_truth for new people =====
     const defaultLivingTruth = JSON.stringify({
       status: 'alive',
       confidence: 90,
-      reason: 'Initial creation',
-      version: 1
+      source: 'canonical_record',
+      updated_at: new Date().toISOString(),
     });
 
     try {
@@ -71,7 +71,6 @@ export default async function handler(req, res) {
     const normalizedPhone = normalizePhone(phone);
 
     try {
-      // Verify organization ownership
       const check = await pool.query(
         `SELECT id FROM people WHERE id = $1 AND organization_id = $2`,
         [id, orgId]
@@ -80,7 +79,6 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: 'Person not found in this organization' });
       }
 
-      // Build update dynamically – only fields present in request
       const updates = [];
       const values = [];
       let paramCount = 1;
@@ -132,4 +130,4 @@ export default async function handler(req, res) {
   }
 
   res.status(405).end();
-    }
+}
