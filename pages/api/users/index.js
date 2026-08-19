@@ -1,25 +1,14 @@
 // pages/api/users/index.js
-import pool from '../../../lib/db';
-import { getAuthUser } from '../../../lib/auth';
+import { withOrg } from '../../../lib/apiHelpers';
 
-export default async function handler(req, res) {
-    const authUser = await getAuthUser(req);
-    if (!authUser) return res.status(401).json({ error: 'Unauthorized' });
-
-    const currentUserRes = await pool.query(
-        `SELECT role, organization_id FROM users WHERE email = $1`,
-        [authUser.email]
-    );
-    if (currentUserRes.rows.length === 0) {
-        return res.status(403).json({ error: 'User not found' });
-    }
-    const currentUser = currentUserRes.rows[0];
-    const orgId = currentUser.organization_id;
+export default withOrg(async function handler(req, res) {
+    const orgId = req.org.id;
+    const currentUser = req.user;
 
     if (req.method === 'GET') {
         try {
             const result = await pool.query(
-                `SELECT id, organization_id, email, name, role, created_at, updated_at
+                `SELECT id, email, name, role, created_at, updated_at
                  FROM users
                  WHERE organization_id = $1
                  ORDER BY created_at`,
@@ -54,6 +43,7 @@ export default async function handler(req, res) {
         }
 
         try {
+            // Check if user already exists
             const existing = await pool.query(
                 `SELECT id FROM users WHERE email = $1 AND organization_id = $2`,
                 [email, orgId]
@@ -65,7 +55,7 @@ export default async function handler(req, res) {
             const result = await pool.query(
                 `INSERT INTO users (organization_id, email, name, role)
                  VALUES ($1, $2, $3, $4)
-                 RETURNING id, organization_id, email, name, role, created_at, updated_at`,
+                 RETURNING id, email, name, role, created_at, updated_at`,
                 [orgId, email, name, role]
             );
             res.status(201).json(result.rows[0]);
@@ -77,4 +67,4 @@ export default async function handler(req, res) {
     }
 
     res.status(405).end();
-                }
+});
