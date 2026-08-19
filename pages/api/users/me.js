@@ -1,6 +1,6 @@
 // pages/api/users/me.js
-import pool from '../../lib/db';
-import { getAuthUser, getOrCreateCareUser } from '../../lib/auth';
+import pool from '../../../lib/db';
+import { getAuthUser, getOrCreateCareUser } from '../../../lib/auth';
 
 export default async function handler(req, res) {
     if (req.method !== 'GET') return res.status(405).end();
