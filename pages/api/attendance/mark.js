@@ -1,56 +1,62 @@
 // pages/api/attendance/mark.js
 import pool from '../../../lib/db';
+import { withOrg } from '../../../lib/apiHelpers';
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end();
+export default withOrg(async function handler(req, res) {
+    if (req.method !== 'POST') return res.status(405).end();
 
-  const { session_id, people_id, present, user_id, group_id } = req.body;
-  if (!session_id || !people_id) return res.status(400).json({ error: 'Missing session_id or people_id' });
-
-  const today = new Date().toISOString().slice(0, 10);
-  const orgId = req.body.organization_id || 'demo-org';
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    // 1. Upsert attendance record
-    await client.query(
-      `INSERT INTO attendance_records (people_id, attendance_date, present, session_section_id)
-       VALUES ($1, $2, $3, (SELECT id FROM session_sections WHERE session_id = $4 LIMIT 1))
-       ON CONFLICT (people_id, attendance_date) DO UPDATE SET present = $3`,
-      [people_id, today, present ? true : false, session_id]
-    );
-
-    // 2. Insert into participation_records (only if not already present for this day)
-    const existing = await client.query(
-      `SELECT 1 FROM participation_records
-       WHERE person_id = $1 AND participation_date = $2 AND organization_id = $3`,
-      [people_id, today, orgId]
-    );
-    if (existing.rows.length === 0) {
-      await client.query(
-        `INSERT INTO participation_records (organization_id, person_id, participation_date, present, created_at)
-         VALUES ($1, $2, $3, $4, NOW())`,
-        [orgId, people_id, today, present ? true : false]
-      );
+    const { session_id, people_id, present } = req.body;
+    if (!session_id || !people_id) {
+        return res.status(400).json({ error: 'Missing session_id or people_id' });
     }
 
-    // 3. Log user mark (if provided)
-    if (user_id) {
-      await client.query(
-        `INSERT INTO user_marks (user_id, people_id, session_id) VALUES ($1, $2, $3)`,
-        [user_id, people_id, session_id]
-      );
+    const orgId = req.org.id;
+    const userId = req.user.id;
+
+    // 1. Verify the user is assigned to this session
+    const assignment = await pool.query(
+        `SELECT 1 FROM session_users WHERE session_id = $1 AND user_id = $2`,
+        [session_id, userId]
+    );
+    if (assignment.rows.length === 0) {
+        return res.status(403).json({ error: 'You are not assigned to this session.' });
     }
 
-    await client.query('COMMIT');
-    res.status(200).json({ success: true });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Mark error:', err);
-    res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
-  }
-        }
+    // 2. Verify session belongs to org
+    const sessionCheck = await pool.query(
+        `SELECT id FROM sessions WHERE id = $1 AND organization_id = $2`,
+        [session_id, orgId]
+    );
+    if (sessionCheck.rows.length === 0) {
+        return res.status(403).json({ error: 'Session not found in your organization.' });
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Insert/update attendance_records (always present=true, confirmed=false)
+        await client.query(
+            `INSERT INTO attendance_records (
+                people_id, attendance_date, present, session_id, marked_by, marked_at, confirmed
+             ) VALUES ($1, $2, true, $3, $4, NOW(), false)
+             ON CONFLICT (people_id, attendance_date) DO UPDATE SET
+                present = true,
+                session_id = EXCLUDED.session_id,
+                marked_by = EXCLUDED.marked_by,
+                marked_at = NOW(),
+                confirmed = false`,
+            [people_id, today, session_id, userId]
+        );
+
+        await client.query('COMMIT');
+        res.status(200).json({ success: true });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Mark error:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
