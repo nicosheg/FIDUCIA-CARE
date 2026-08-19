@@ -1,6 +1,6 @@
 // pages/api/users/index.js
-import pool from '../../lib/db';
-import { getAuthUser } from '../../lib/auth';
+import pool from '../../../lib/db';
+import { getAuthUser } from '../../../lib/auth';
 
 export default async function handler(req, res) {
     const authUser = await getAuthUser(req);
@@ -77,4 +77,4 @@ export default async function handler(req, res) {
     }
 
     res.status(405).end();
-              }
+                }
