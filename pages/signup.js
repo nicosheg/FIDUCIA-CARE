@@ -3,6 +3,17 @@ import { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useRouter } from 'next/router';
 
+// Helper to safely extract error message
+function getErrorMessage(error) {
+    if (typeof error === 'string') return error;
+    if (error?.message) return error.message;
+    if (error?.error_description) return error.error_description;
+    if (typeof error === 'object' && error !== null) {
+        return JSON.stringify(error);
+    }
+    return 'Something went wrong. Please try again.';
+}
+
 export default function Signup() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -23,11 +34,9 @@ export default function Signup() {
             },
         });
         if (error) {
-            setMessage(error.message);
+            setMessage(getErrorMessage(error));
         } else {
             setMessage('Account created! Please check your email to confirm.');
-            // After confirmation, the Supabase trigger will create the org and user.
-            // Redirect to login after a delay.
             setTimeout(() => router.push('/login'), 3000);
         }
         setLoading(false);
