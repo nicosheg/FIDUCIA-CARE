@@ -1,10 +1,11 @@
 // pages/api/identity/review-items.js
 import pool from '../../../lib/db';
+import { withOrg } from '../../../lib/apiHelpers';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
 
-  const orgId = req.query.organization_id || 'demo-org';
+  const orgId = req.org.id;
 
   try {
     // Get people with living_truth that have a review object
@@ -28,7 +29,6 @@ export default async function handler(req, res) {
       const matchedId = review.matched_person_id;
       if (!matchedId) continue;
 
-      // Build key as sorted pair
       const key = p.id < matchedId ? `${p.id}:${matchedId}` : `${matchedId}:${p.id}`;
       if (!pairMap.has(key)) {
         pairMap.set(key, {
@@ -42,10 +42,9 @@ export default async function handler(req, res) {
           created_at: lt.updated_at || null,
         });
       }
-      // We could merge evidence if needed, but they should be identical.
     }
 
-    // Now fetch names and phones for all unique persons in the pairs
+    // Fetch names and phones for all unique persons in the pairs
     const allIds = new Set();
     for (const [key, pair] of pairMap) {
       allIds.add(pair.person_a);
@@ -93,4 +92,6 @@ export default async function handler(req, res) {
     console.error('Review items error:', err);
     res.status(500).json({ error: err.message });
   }
-      }
+}
+
+export default withOrg(handler);
