@@ -3,15 +3,26 @@ import { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useRouter } from 'next/router';
 
-// Helper to safely extract error message
 function getErrorMessage(error) {
+    // If error is null/undefined, return a generic message
+    if (!error) return 'Something went wrong. Please try again.';
+    
+    // If it's a string, use it directly
     if (typeof error === 'string') return error;
-    if (error?.message) return error.message;
-    if (error?.error_description) return error.error_description;
-    if (typeof error === 'object' && error !== null) {
-        return JSON.stringify(error);
+    
+    // If it has a message property, use that
+    if (error.message) return error.message;
+    
+    // If it has an error_description (common in OAuth errors)
+    if (error.error_description) return error.error_description;
+    
+    // If it's an empty object, we don't know the real error
+    if (typeof error === 'object' && Object.keys(error).length === 0) {
+        return 'An unknown error occurred. Please check your connection and try again.';
     }
-    return 'Something went wrong. Please try again.';
+    
+    // Fallback: stringify the object (but we should avoid showing raw JSON to users)
+    return JSON.stringify(error);
 }
 
 export default function Signup() {
@@ -26,18 +37,29 @@ export default function Signup() {
         e.preventDefault();
         setLoading(true);
         setMessage('');
-        const { error } = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-                data: { name },
-            },
-        });
-        if (error) {
-            setMessage(getErrorMessage(error));
-        } else {
-            setMessage('Account created! Please check your email to confirm.');
-            setTimeout(() => router.push('/login'), 3000);
+        try {
+            const { data, error } = await supabase.auth.signUp({
+                email,
+                password,
+                options: {
+                    data: { name },
+                },
+            });
+            
+            // Debug: log the full response to the console
+            console.log('Signup response:', { data, error });
+            
+            if (error) {
+                setMessage(getErrorMessage(error));
+            } else {
+                setMessage('Account created! Please check your email to confirm.');
+                // Redirect to login after a delay
+                setTimeout(() => router.push('/login'), 3000);
+            }
+        } catch (err) {
+            // Catch any network/other errors
+            console.error('Signup exception:', err);
+            setMessage('Network error. Please check your connection and try again.');
         }
         setLoading(false);
     };
@@ -93,4 +115,4 @@ export default function Signup() {
             </p>
         </div>
     );
-}
+                                       }
