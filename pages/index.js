@@ -1,23 +1,46 @@
 // pages/index.js
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
+import { supabase } from '../lib/supabaseClient';
 import Layout from '../components/Layout';
 
 export default function ARIAHome() {
+  const router = useRouter();
+  const [session, setSession] = useState(null);
+  const [orgId, setOrgId] = useState(null);
   const [briefing, setBriefing] = useState(null);
   const [priority, setPriority] = useState([]);
   const [brainFeed, setBrainFeed] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(true);
-  const orgId = 'demo-org';
 
   useEffect(() => {
-    async function loadData() {
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.push('/login');
+        return;
+      }
+      setSession(session);
+
+      const userRes = await fetch('/api/users/me', {
+        headers: { 'Authorization': `Bearer ${session.access_token}` }
+      });
+      if (!userRes.ok) {
+        router.push('/login');
+        return;
+      }
+      const user = await userRes.json();
+      const org = user.organization_id;
+      setOrgId(org);
+
       try {
+        const headers = { 'Authorization': `Bearer ${session.access_token}` };
         const [briefRes, prioRes, feedRes, recRes] = await Promise.all([
-          fetch(`/api/daily-briefing/latest?organization_id=${orgId}`),
-          fetch(`/api/priority-queue?organization_id=${orgId}&limit=10`),
-          fetch(`/api/brain-feed?organization_id=${orgId}&limit=10`),
-          fetch(`/api/recommendations?organization_id=${orgId}`),
+          fetch(`/api/daily-briefing/latest?organization_id=${org}`, { headers }),
+          fetch(`/api/priority-queue?organization_id=${org}&limit=10`, { headers }),
+          fetch(`/api/brain-feed?organization_id=${org}&limit=10`, { headers }),
+          fetch(`/api/recommendations?organization_id=${org}`, { headers }),
         ]);
         const brief = await briefRes.json();
         setBriefing(brief);
@@ -33,8 +56,13 @@ export default function ARIAHome() {
         setLoading(false);
       }
     }
-    loadData();
-  }, [orgId]);
+    init();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) router.push('/login');
+    });
+    return () => subscription.unsubscribe();
+  }, [router]);
 
   if (loading) {
     return (
