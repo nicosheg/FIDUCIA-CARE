@@ -1,8 +1,15 @@
+// components/Layout.js
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { supabase } from '../lib/supabaseClient';
 
 export default function Layout({ children }) {
   const router = useRouter();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+  };
 
   return (
     <>
@@ -35,6 +42,9 @@ export default function Layout({ children }) {
         <Link href="/church-profile" className={router.pathname === '/church-profile' ? 'navLink active' : 'navLink'}>
           Church Profile
         </Link>
+        <button onClick={handleLogout} className="navLink logout-btn">
+          Logout
+        </button>
       </nav>
 
       <main className="mainContent">{children}</main>
@@ -100,6 +110,7 @@ export default function Layout({ children }) {
           justify-content: center;
           gap: 36px;
           flex-wrap: wrap;
+          align-items: center;
         }
         .navLink {
           text-decoration: none;
@@ -109,6 +120,9 @@ export default function Layout({ children }) {
           position: relative;
           padding: 4px 0;
           transition: color 0.3s, text-shadow 0.3s;
+          background: none;
+          border: none;
+          cursor: pointer;
         }
         .navLink.active {
           color: #D4AF37;
@@ -125,6 +139,14 @@ export default function Layout({ children }) {
           height: 2px;
           background: radial-gradient(ellipse at center, rgba(212,175,55,0.6) 0%, transparent 80%);
           border-radius: 50%;
+        }
+        .logout-btn {
+          color: rgba(255,255,255,0.4);
+          font-size: 14px;
+        }
+        .logout-btn:hover {
+          color: #EF4444;
+          text-shadow: 0 0 12px rgba(239,68,68,0.15);
         }
 
         /* ---------- Main Content ---------- */
@@ -265,4 +287,4 @@ export default function Layout({ children }) {
       `}</style>
     </>
   );
-    }
+  
