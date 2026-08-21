@@ -1,8 +1,7 @@
 // pages/review-center.js
 import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import Layout from '../components/Layout';
-
-const ORG_ID = 'demo-org';
 
 export default function ReviewCenter() {
   const [reviews, setReviews] = useState([]);
@@ -11,13 +10,27 @@ export default function ReviewCenter() {
   const [message, setMessage] = useState('');
 
   const fetchReviews = async () => {
-    const res = await fetch(`/api/identity/review-items?organization_id=${ORG_ID}`);
-    const data = await res.json();
-    if (data.items) {
-      setReviews(data.items);
-      setStats(data.stats);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setLoading(false);
+      return;
     }
-    setLoading(false);
+    try {
+      const res = await fetch('/api/identity/review-items', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+      const data = await res.json();
+      if (data.items) {
+        setReviews(data.items);
+        setStats(data.stats);
+      }
+    } catch (e) {
+      console.error('Fetch reviews error:', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -27,21 +40,27 @@ export default function ReviewCenter() {
   const handleAction = async (personId, matchedId, action) => {
     if (!confirm(`Are you sure you want to ${action} these two records?`)) return;
     setMessage('Processing...');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setMessage('❌ You must be logged in.');
+      return;
+    }
     try {
       const res = await fetch('/api/identity/review-action', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
           person_id: personId,
           matched_person_id: matchedId,
           action,
-          organization_id: ORG_ID,
         }),
       });
       const data = await res.json();
       if (data.success) {
         setMessage(`✅ ${action === 'merge' ? 'Merged' : 'Kept separate'} successfully.`);
-        // Refresh list
         fetchReviews();
         setTimeout(() => setMessage(''), 3000);
       } else {
@@ -96,20 +115,17 @@ export default function ReviewCenter() {
                       ⚠ Possible Duplicate
                     </h3>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
-                      {/* Person A */}
                       <div>
                         <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>Person A</div>
                         <div style={{ color: '#f0f0f0', fontWeight: 500 }}>{review.person_name}</div>
                         <div style={{ color: 'rgba(255,255,255,0.4)' }}>{review.person_phone || 'No phone'}</div>
                       </div>
-                      {/* Person B */}
                       <div>
                         <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>Person B</div>
                         <div style={{ color: '#f0f0f0', fontWeight: 500 }}>{review.matched_person_name}</div>
                         <div style={{ color: 'rgba(255,255,255,0.4)' }}>{review.matched_person_phone || 'No phone'}</div>
                       </div>
                     </div>
-                    {/* Evidence */}
                     <div style={{ marginTop: 12 }}>
                       <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 12 }}>Evidence</div>
                       <ul style={{ margin: '4px 0 0', paddingLeft: 20, color: '#D4AF37' }}>
@@ -128,7 +144,6 @@ export default function ReviewCenter() {
                       </div>
                     </div>
                   </div>
-                  {/* Actions */}
                   <div style={{ display: 'flex', gap: 10, marginLeft: 20 }}>
                     <button
                       onClick={() => handleAction(review.person_id, review.matched_person_id, 'merge')}
@@ -170,4 +185,4 @@ export default function ReviewCenter() {
       </div>
     </Layout>
   );
-      }
+        }
