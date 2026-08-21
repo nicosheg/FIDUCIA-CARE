@@ -1,5 +1,6 @@
 // pages/care-queue.js
 import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import Layout from '../components/Layout';
 
 export default function CareQueue() {
@@ -8,9 +9,18 @@ export default function CareQueue() {
   const [scanning, setScanning] = useState(false);
 
   const fetchQueue = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const res = await fetch('/api/care-queue?organization_id=demo-org');
+      const res = await fetch('/api/care-queue', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       setItems(data);
@@ -22,11 +32,16 @@ export default function CareQueue() {
   };
 
   const runAriaScan = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
     setScanning(true);
     try {
       await fetch('/api/care-queue', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({ action: 'scan' }),
       });
       await fetchQueue();
