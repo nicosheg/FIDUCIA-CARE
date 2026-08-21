@@ -1,10 +1,10 @@
 // pages/community.js – Part 1 of 3
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
+import { supabase } from '../lib/supabaseClient';
 import Layout from '../components/Layout';
 import BirthdayPicker from '../components/BirthdayPicker';
 
-const ORG_ID = 'demo-org';
 const ICONS = {
   visitor: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D4AF37" strokeWidth="2"><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 4-7 8-7s8 3 8 7" /></svg>),
   phone: (<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12" y2="18.01" stroke="currentColor" strokeWidth="3" /></svg>),
@@ -26,8 +26,6 @@ const ICONS = {
 const isSuspicious = n => n && (n.length > 60 || [/\*\*/, /->/, /Line \d+/, /Let's/, /re-read/, /carefully/, /illegible/, /faint/, /<think>/, /the user wants/, /analyze the image/, /I will/, /^[0-9]+\./, /^[*\-]/].some(p => p.test(n)));
 const getNextBirthday = b => b ? Math.ceil((new Date(new Date(b).setFullYear(new Date().getFullYear())) - new Date()) / (1000*60*60*24)) : null;
 
-// ===== UPDATED: statusColor returns a CSS value for the dot =====
-// For 'conflict', we use a gradient that splits blue and gold.
 const statusColor = (s) => {
   if (s === 'alive') return '#8FB7FF';
   if (s === 'needs_decision') return '#D4AF37';
@@ -35,7 +33,6 @@ const statusColor = (s) => {
   return 'rgba(255,255,255,0.4)';
 };
 
-// ===== UPDATED: human-friendly labels and explanations =====
 const statusLabel = (s) => {
   if (s === 'alive') return 'Stable Truth';
   if (s === 'needs_decision') return 'Needs Evidence';
@@ -50,7 +47,6 @@ const statusExplanation = (status, confidence) => {
   return null;
 };
 
-// ── Loading Skeleton ──
 function LoadingSkeleton() {
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
@@ -92,10 +88,42 @@ export default function CommunityPage() {
   const [showReviewPanel, setShowReviewPanel] = useState(false);
   const [scanJobId, setScanJobId] = useState(null);
 
-  const fetchPeople = async () => {
-    const res = await fetch(`/api/people?organization_id=${ORG_ID}&_=${Date.now()}`);
+  // Get session and token for authenticated requests
+  const [accessToken, setAccessToken] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setAccessToken(session.access_token);
+        fetchPeople(session.access_token);
+        initAria(session.access_token);
+      } else {
+        setLoading(false);
+      }
+    });
+  }, []);
+
+  const fetchPeople = async (token) => {
+    const res = await fetch('/api/people', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
     const data = await res.json();
     if (Array.isArray(data)) { setPeople(data); setLoading(false); }
+  };
+
+  const initAria = async (token) => {
+    try {
+      await fetch('/api/aria/initialize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+    } catch (err) {
+      console.warn('Baseline initialization failed:', err);
+    }
   };
 
   const computeReviewItems = (peopleList) => {
@@ -118,19 +146,6 @@ export default function CommunityPage() {
     });
     return items;
   };
-
-  // ===== FIXED: Initialize ARIA baseline then fetch people =====
-  useEffect(() => {
-    async function initAndLoad() {
-      await fetch('/api/aria/initialize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ organization_id: ORG_ID }),
-      }).catch(err => console.warn('Baseline initialization failed:', err));
-      await fetchPeople();
-    }
-    initAndLoad();
-  }, []);
 
   // Update review items whenever people changes
   useEffect(() => {
@@ -162,13 +177,23 @@ export default function CommunityPage() {
   const selectAll = () => setSelectedIds(new Set(filtered.map(p => p.id)));
   const cancelSelect = () => { setSelectMode(false); setSelectedIds(new Set()); };
 
-  // ... (addPerson, saveEdit, deletePerson, bulkDelete, generateDraft, saveNote, importConversation, resolveReview remain unchanged except resolveReview if needed)
-  // I'll include them for completeness, but they are unchanged.
-  const addPerson = async e => {
+  const addPerson = async (e) => {
     e.preventDefault();
-    if (!form.full_name.trim()) return;
+    if (!form.full_name.trim() || !accessToken) return;
     try {
-      const res = await fetch('/api/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ first_name: form.full_name.trim(), phone: form.phone, type: form.type, birthday: form.birthday || null }) });
+      const res = await fetch('/api/people', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          first_name: form.full_name.trim(),
+          phone: form.phone,
+          type: form.type,
+          birthday: form.birthday || null,
+        }),
+      });
       const data = await res.json();
       if (res.ok && data.id) {
         setPeople(prev => [data, ...prev]);
@@ -184,9 +209,22 @@ export default function CommunityPage() {
   };
 
   const saveEdit = async (id) => {
-    if (!editName.trim()) return;
+    if (!editName.trim() || !accessToken) return;
     try {
-      const res = await fetch('/api/people', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, first_name: editName.trim(), phone: editPhone, type: people.find(p => p.id === id)?.type || 'visitor', birthday: editBirthday || null }) });
+      const res = await fetch('/api/people', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          id,
+          first_name: editName.trim(),
+          phone: editPhone,
+          type: people.find(p => p.id === id)?.type || 'visitor',
+          birthday: editBirthday || null,
+        }),
+      });
       const data = await res.json();
       if (res.ok && data.id) {
         setPeople(prev => prev.map(p => p.id === id ? data : p));
@@ -203,9 +241,16 @@ export default function CommunityPage() {
 
   const deletePerson = async (id, e) => {
     if (e) e.stopPropagation();
-    if (!confirm('Remove this person?')) return;
+    if (!confirm('Remove this person?') || !accessToken) return;
     try {
-      const res = await fetch('/api/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+      const res = await fetch('/api/people/delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ id }),
+      });
       const data = await res.json();
       if (res.ok && data.success && data.deleted > 0) {
         setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id)));
@@ -219,11 +264,18 @@ export default function CommunityPage() {
   };
 
   const bulkDelete = async () => {
-    if (selectedIds.size === 0) return;
+    if (selectedIds.size === 0 || !accessToken) return;
     if (!confirm(`Remove ${selectedIds.size} selected people?`)) return;
     const ids = Array.from(selectedIds);
     try {
-      const res = await fetch('/api/people/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
+      const res = await fetch('/api/people/delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ ids }),
+      });
       const data = await res.json();
       if (res.ok && data.success && data.deleted > 0) {
         setPeople(prev => prev.filter(p => !data.deleted_ids.includes(p.id)));
@@ -239,7 +291,15 @@ export default function CommunityPage() {
   };
 
   const generateDraft = async (id) => {
-    const res = await fetch('/api/presence/draft', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: id }) });
+    if (!accessToken) return;
+    const res = await fetch('/api/presence/draft', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ person_id: id }),
+    });
     const data = await res.json();
     if (data.message) {
       if (confirm(data.message + '\n\nOpen WhatsApp to send?')) {
@@ -247,7 +307,20 @@ export default function CommunityPage() {
         if (person && person.phone) {
           const phone = person.phone.startsWith('+') ? person.phone.substring(1) : person.phone;
           window.open(`https://wa.me/${phone}?text=${encodeURIComponent(data.message)}`, '_blank');
-          await fetch('/api/timeline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: id, event_type: 'message_sent', channel: 'whatsapp', description: data.message.substring(0, 100), organization_id: ORG_ID, metadata: { type: 'manual_send' } }) });
+          await fetch('/api/timeline', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              person_id: id,
+              event_type: 'message_sent',
+              channel: 'whatsapp',
+              description: data.message.substring(0, 100),
+              metadata: { type: 'manual_send' },
+            }),
+          });
           setMsg('Message opened in WhatsApp'); setTimeout(() => setMsg(''), 3000);
         }
       }
@@ -255,14 +328,34 @@ export default function CommunityPage() {
   };
 
   const saveNote = async () => {
-    if (!noteText.trim()) return;
-    await fetch('/api/timeline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: selected.id, event_type: 'note', channel: 'manual', description: noteText.trim(), organization_id: ORG_ID, metadata: { type: 'pastoral_note' } }) });
+    if (!noteText.trim() || !accessToken) return;
+    await fetch('/api/timeline', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        person_id: selected.id,
+        event_type: 'note',
+        channel: 'manual',
+        description: noteText.trim(),
+        metadata: { type: 'pastoral_note' },
+      }),
+    });
     setNoteText(''); setAddingNote(false); setMsg('Note saved'); setTimeout(() => setMsg(''), 3000);
   };
 
   const importConversation = async () => {
-    if (!convText.trim()) return;
-    const res = await fetch('/api/conversation/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ person_id: selected.id, text: convText.trim() }) });
+    if (!convText.trim() || !accessToken) return;
+    const res = await fetch('/api/conversation/import', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({ person_id: selected.id, text: convText.trim() }),
+    });
     const data = await res.json();
     if (data.success) { setConvText(''); setImportingConv(false); setMsg(`Conversation imported – ${data.extracted} key events extracted`); }
     else { setMsg('Error: ' + (data.error || 'Import failed')); }
@@ -270,10 +363,14 @@ export default function CommunityPage() {
   };
 
   const resolveReview = async (item, action, targetId = null) => {
+    if (!accessToken) return;
     try {
       const res = await fetch('/api/identity/resolve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           scan_job_id: null,
           extracted_name: item.extracted_name,
@@ -282,7 +379,7 @@ export default function CommunityPage() {
         }),
       });
       if (res.ok) {
-        fetchPeople();
+        fetchPeople(accessToken);
         setMsg('Resolved successfully.');
         setTimeout(() => setMsg(''), 3000);
       } else {
@@ -298,6 +395,7 @@ export default function CommunityPage() {
 
   const stopProp = (e) => e.stopPropagation();
 
+  // The JSX (Part 3) uses the same state and functions defined here.
 // pages/community.js – Part 3 of 3
   if (loading) {
     return (
@@ -320,7 +418,7 @@ export default function CommunityPage() {
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '20px' }}>
         <h1 style={{ fontSize: 28, fontWeight: 600, color: '#f0f0f0', marginBottom: 25 }}>{people.length} lives remembered</h1>
 
-        {/* Living Truth Banner – only counts needs_decision and conflict */}
+        {/* Living Truth Banner */}
         <div style={{ marginBottom: 20 }}>
           {reviewStats.total === 0 ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'rgba(255,255,255,0.3)' }}>
@@ -339,7 +437,7 @@ export default function CommunityPage() {
           )}
         </div>
 
-        {/* Review Panel (unchanged, already uses reviewItems) */}
+        {/* Review Panel */}
         {showReviewPanel && (
           <div className="review-panel-overlay" onClick={() => setShowReviewPanel(false)}>
             <div className="review-panel" onClick={e => e.stopPropagation()}>
@@ -367,7 +465,7 @@ export default function CommunityPage() {
           </div>
         )}
 
-        {/* Controls – unchanged */}
+        {/* Controls */}
         <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap', alignItems: 'center' }}>
           <input type="text" placeholder="Search by name or phone" value={search} onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none' }} />
           <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)} style={{ padding: '10px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.8)', color: '#fff', outline: 'none', width: 120 }}>
@@ -385,7 +483,6 @@ export default function CommunityPage() {
 
         {showAdd && (
           <form onSubmit={addPerson} className="fiducia-card" style={{ padding: 20, marginBottom: 24, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {/* ... form fields unchanged ... */}
             <input placeholder="Full Name" value={form.full_name} onChange={e => setForm({ ...form, full_name: e.target.value })} required style={miniInput} />
             <input placeholder="Phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={miniInput} />
             <div style={{ marginBottom: 8 }}>
@@ -408,7 +505,6 @@ export default function CommunityPage() {
             const truth = person.living_truth;
             const status = truth?.status || null;
             const label = statusLabel(status);
-            // UPDATED: use statusExplanation for human-friendly text
             const explanation = statusExplanation(status, truth?.confidence);
 
             return (
@@ -417,7 +513,6 @@ export default function CommunityPage() {
 
                 {editingId === person.id ? (
                   <div onClick={stopProp} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {/* edit fields – unchanged */}
                     <input value={editName} onChange={e => setEditName(e.target.value)} style={miniInput} placeholder="Full Name" />
                     <input value={editPhone} onChange={e => setEditPhone(e.target.value)} style={miniInput} placeholder="Phone" />
                     <div style={{ marginBottom: 8 }}>
@@ -438,7 +533,6 @@ export default function CommunityPage() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 600, fontSize: 17, color: '#f0f0f0' }}>{person.first_name}</span>
                         {status && (
-                          // ===== UPDATED: Status badge with pulsing amoeba style =====
                           <span style={{
                             display: 'inline-flex',
                             alignItems: 'center',
@@ -452,7 +546,6 @@ export default function CommunityPage() {
                             color: status === 'conflict' ? '#8FB7FF' : (status === 'alive' ? '#8FB7FF' : '#D4AF37'),
                             boxShadow: `0 0 12px ${status === 'conflict' ? 'rgba(143,183,255,0.15)' : 'rgba(255,255,255,0.02)'}`,
                           }}>
-                            {/* The dot: uses statusColor and pulse animation */}
                             <span style={{
                               display: 'inline-block',
                               width: 10,
@@ -461,7 +554,6 @@ export default function CommunityPage() {
                               background: statusColor(status),
                               animation: 'pulse 2.5s ease-in-out infinite',
                               boxShadow: `0 0 12px ${status === 'conflict' ? 'rgba(143,183,255,0.4)' : 'rgba(255,255,255,0.1)'}`,
-                              // For conflict, the gradient will show both colors
                             }} />
                             {label}
                           </span>
@@ -471,7 +563,6 @@ export default function CommunityPage() {
                         <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 20, background: 'rgba(212,175,55,0.15)', color: '#D4AF37', display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.visitor} {person.type || 'visitor'}</span>
                       </div>
                     </div>
-                    {/* ===== UPDATED: ARIA explanation ===== */}
                     {explanation && (
                       <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.6)', marginBottom: 6, fontStyle: 'italic' }}>
                         {explanation}
@@ -482,7 +573,6 @@ export default function CommunityPage() {
                     {person.last_attended_date && <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.calendar} Last attended: {new Date(person.last_attended_date).toLocaleDateString()}</div>}
                     {person.last_contacted ? <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.mail} Last contacted: {new Date(person.last_contacted).toLocaleDateString()}</div> : <div style={{ color: '#F59E0B', fontSize: 12, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>{ICONS.mail} Never contacted</div>}
 
-                    {/* Expand actions – unchanged */}
                     {selected?.id === person.id && !selectMode && !editingId && (
                       <div style={{ marginTop: 15, padding: '15px 0 0', borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={stopProp}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
@@ -565,7 +655,6 @@ export default function CommunityPage() {
   );
 }
 
-// Helper styles at the bottom (unchanged)
 const miniInput = { padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(20,25,40,0.6)', color: '#fff', outline: 'none' };
 const textareaStyle = { width: '100%', padding: 8, borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.03)', color: '#fff', resize: 'vertical', outline: 'none', marginBottom: 8 };
 const actionBtnStyle = { padding: '6px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 };
