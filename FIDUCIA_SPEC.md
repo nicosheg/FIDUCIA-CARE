@@ -123,7 +123,7 @@ ARIA (explains, recommends, drafts — human stays in control of sending)
 
 **Care Queue:** Has shown "0 items" despite real uncontacted people existing — root cause suspected to be either the `engagement_cases` generation engine not running regularly, or thresholds not yet met. Needs verification once auth migration settles.
 
-**Page consolidation (agreed direction, not yet built):** Reduce from 7 pages to 3 — **Home** (ARIA Today briefing + Care Queue + quick actions), **People** (Community directory + Review Center + Attendance, as tabs), **Settings** (Church Profile + ARIA config + account). Scan becomes a modal/action, not a standalone page.
+**Page consolidation (agreed direction, not yet built):** Reduce from 7 pages to 3 — **Home** (ARIA Today briefing + Care Queue + quick actions), **Community** (Community directory + Review Center + Attendance, as tabs), **Settings** (Church Profile + ARIA config + account). Scan becomes a modal/action, not a standalone page.
 
 ---
 
