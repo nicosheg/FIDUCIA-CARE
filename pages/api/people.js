@@ -1,9 +1,10 @@
 // pages/api/people.js
 import pool from '../../lib/db';
 import { normalizePhone } from '../../lib/phoneUtils';
+import { withOrg } from '../../lib/apiHelpers';
 
-export default async function handler(req, res) {
-  const orgId = req.query.organization_id || req.body?.organization_id || 'demo-org';
+async function handler(req, res) {
+  const orgId = req.org.id; // From withOrg — NEVER from client
 
   // ---------- GET ----------
   if (req.method === 'GET') {
@@ -20,15 +21,11 @@ export default async function handler(req, res) {
       WHERE p.organization_id = $1
         AND p.status != 'deleted'
         AND (p.living_truth IS NULL OR p.living_truth->>'status' != 'merged')
+      ORDER BY p.created_at DESC
     `;
 
-    const deletedClause = " AND p.status != 'deleted'";
-    const finalQuery = includeDeleted
-      ? baseQuery + ' ORDER BY p.created_at DESC'
-      : baseQuery + ' ORDER BY p.created_at DESC';
-
     try {
-      const { rows } = await pool.query(finalQuery, [orgId]);
+      const { rows } = await pool.query(baseQuery, [orgId]);
       return res.status(200).json(rows);
     } catch (err) {
       console.error('GET people error:', err);
@@ -109,8 +106,8 @@ export default async function handler(req, res) {
       }
 
       updates.push(`updated_at = NOW()`);
-
       values.push(id, orgId);
+
       const query = `
         UPDATE people
         SET ${updates.join(', ')}
@@ -131,3 +128,5 @@ export default async function handler(req, res) {
 
   res.status(405).end();
 }
+
+export default withOrg(handler);
