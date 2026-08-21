@@ -1,5 +1,6 @@
-// pages/attendance.js – FIDUCIA design system only
+// pages/attendance.js
 import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../lib/supabaseClient';
 import Layout from '../components/Layout';
 
 export default function AttendancePage() {
@@ -12,11 +13,29 @@ export default function AttendancePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const orgId = 'demo-org';
+  const orgId = 'demo-org'; // Will be replaced later with session org
+
+  // Get logged-in user name
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        setSession(session);
+        const name = session.user?.user_metadata?.name || session.user?.email?.split('@')[0] || 'User';
+        setUserName(name);
+      }
+    });
+  }, []);
 
   const fetchActiveSession = useCallback(async () => {
     try {
-      const res = await fetch(`/api/attendance/active-session?organization_id=${orgId}`);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setLoading(false);
+        return;
+      }
+      const res = await fetch(`/api/attendance/active-session`, {
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
       const data = await res.json();
       if (data.active) {
         setSession(data);
@@ -36,7 +55,11 @@ export default function AttendancePage() {
 
   const fetchGroups = async (sessionId) => {
     try {
-      const res = await fetch(`/api/attendance/groups?organization_id=${orgId}`);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch(`/api/attendance/groups`, {
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
       const data = await res.json();
       setGroups(data);
       if (data.length > 0) {
@@ -51,7 +74,11 @@ export default function AttendancePage() {
 
   const fetchPeopleForGroup = async (groupId) => {
     try {
-      const res = await fetch(`/api/attendance/people-for-group?group_id=${groupId}&organization_id=${orgId}`);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch(`/api/attendance/people-for-group?group_id=${groupId}`, {
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
       const data = await res.json();
       setPeople(data);
     } catch (err) {
@@ -64,11 +91,15 @@ export default function AttendancePage() {
     const name = prompt('Enter session name (e.g., Sunday Worship):');
     if (!name) return;
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
       const res = await fetch('/api/attendance/create-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
-          organization_id: orgId,
           name,
           group_ids: groups.map(g => g.id),
         }),
@@ -91,9 +122,14 @@ export default function AttendancePage() {
       return;
     }
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
       const res = await fetch('/api/attendance/claim-group', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
           session_id: session.session_id,
           group_id: groupId,
@@ -120,9 +156,14 @@ export default function AttendancePage() {
   const markAttendance = async (personId, present) => {
     if (!session) return;
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
       const res = await fetch('/api/attendance/mark', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
           session_id: session.session_id,
           people_id: personId,
@@ -245,17 +286,10 @@ export default function AttendancePage() {
         </div>
 
         <div className="username-section">
-          <label htmlFor="username-input" className="username-label">
+          <label className="username-label">
             Your Name (for claiming groups)
           </label>
-          <input
-            id="username-input"
-            type="text"
-            value={userName}
-            onChange={e => setUserName(e.target.value)}
-            placeholder="Enter your name"
-            className="username-input"
-          />
+          <div className="username-display">{userName}</div>
         </div>
 
         {session && groups.length > 0 && (
@@ -431,19 +465,15 @@ export default function AttendancePage() {
           font-size: 0.85rem;
           margin-bottom: 4px;
         }
-        .username-input {
-          width: 100%;
+        .username-display {
           padding: 10px 14px;
           border-radius: 12px;
           border: 1px solid rgba(255,255,255,0.06);
-          background: rgba(20,25,40,0.8);
+          background: rgba(20,25,40,0.6);
           color: #f0f0f0;
           font-size: 1rem;
           outline: none;
-          transition: border-color 0.2s;
-        }
-        .username-input:focus {
-          border-color: rgba(212, 175, 55, 0.3);
+          cursor: default;
         }
 
         .groups-section {
@@ -606,4 +636,4 @@ export default function AttendancePage() {
       `}</style>
     </Layout>
   );
-        }
+    }
