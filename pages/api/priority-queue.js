@@ -1,9 +1,11 @@
 // pages/api/priority-queue.js
 import { getPriorityQueue } from '../../lib/aria/priorityQueue';
+import { withOrg } from '../../lib/apiHelpers';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
-  const orgId = req.query.organization_id || 'demo-org';
+  
+  const orgId = req.org.id; // From withOrg
   const limit = parseInt(req.query.limit) || 10;
 
   try {
@@ -14,3 +16,5 @@ export default async function handler(req, res) {
     res.status(500).json({ error: err.message });
   }
 }
+
+export default withOrg(handler);
