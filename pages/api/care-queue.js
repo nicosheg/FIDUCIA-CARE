@@ -1,12 +1,12 @@
 // pages/api/care-queue.js
 import pool from '../../lib/db';
+import { withOrg } from '../../lib/apiHelpers';
 
-export default async function handler(req, res) {
-  const orgId = req.query.organization_id || req.body?.organization_id || 'demo-org';
+async function handler(req, res) {
+  const orgId = req.org.id; // From withOrg
 
   // POST: trigger intelligence scan (optional)
   if (req.method === 'POST') {
-    // We could call updateEngagementCases here, but we'll keep it simple for now.
     return res.status(200).json({ message: 'ARIA scan triggered.' });
   }
 
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
          FROM engagement_cases ec
          JOIN people p ON ec.person_id = p.id
          WHERE ec.organization_id = $1 AND ec.resolved = false
-         ORDER BY 
+         ORDER BY
            CASE ec.risk_level
              WHEN 'critical' THEN 1
              WHEN 'high' THEN 2
@@ -35,7 +35,7 @@ export default async function handler(req, res) {
         first_name: row.first_name,
         phone: row.phone,
         priority: row.risk_level === 'critical' ? 'high' : row.risk_level === 'high' ? 'medium' : 'low',
-        text: `${row.first_name} has been inactive for ${row.inactivity_streak} weeks. ${row.risk_level === 'critical' ? 'URGENT: Leader action required.' : 'Care needed.'}`,
+        text: `${row.first_name} has been inactive for ${row.inactivity_streak} weeks. ${row.risk_level === 'critical' ? 'Immediate attention needed.' : ''}`,
         risk_level: row.risk_level,
         engagement_status: row.engagement_status,
         inactivity_streak: row.inactivity_streak,
@@ -52,4 +52,6 @@ export default async function handler(req, res) {
     res.setHeader('Allow', ['GET', 'POST']);
     res.status(405).end(`Method ${req.method} Not Allowed`);
   }
-        }
+}
+
+export default withOrg(handler);
