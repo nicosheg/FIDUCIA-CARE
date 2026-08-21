@@ -3,6 +3,16 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useRouter } from 'next/router';
 
+function getErrorMessage(error) {
+    if (typeof error === 'string') return error;
+    if (error?.message) return error.message;
+    if (error?.error_description) return error.error_description;
+    if (typeof error === 'object' && error !== null) {
+        return JSON.stringify(error);
+    }
+    return 'Something went wrong. Please try again.';
+}
+
 export default function Login() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -10,7 +20,6 @@ export default function Login() {
     const [message, setMessage] = useState('');
     const router = useRouter();
 
-    // Check if already logged in
     useEffect(() => {
         supabase.auth.getSession().then(({ data: { session } }) => {
             if (session) router.push('/');
@@ -23,7 +32,7 @@ export default function Login() {
         setMessage('');
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
-            setMessage(error.message);
+            setMessage(getErrorMessage(error));
         } else {
             router.push('/');
         }
@@ -44,7 +53,7 @@ export default function Login() {
             },
         });
         if (error) {
-            setMessage(error.message);
+            setMessage(getErrorMessage(error));
         } else {
             setMessage('Check your email for the login link.');
         }
