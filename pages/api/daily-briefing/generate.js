@@ -1,12 +1,13 @@
 // pages/api/daily-briefing/generate.js
 import { generateDailyBriefing } from '../../../lib/aria/dailyBriefing';
+import { withAdmin } from '../../../lib/apiHelpers';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const orgId = req.query.organization_id || req.body?.organization_id || 'demo-org';
+  const orgId = req.org.id; // from withOrg
 
   try {
     const result = await generateDailyBriefing(orgId);
@@ -20,3 +21,5 @@ export default async function handler(req, res) {
     res.status(500).json({ error: err.message });
   }
 }
+
+export default withAdmin(handler);
