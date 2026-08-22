@@ -1,6 +1,6 @@
 // pages/api/church-profile.js
-import pool from '../../../lib/db';
-import { withOrg } from '../../../lib/apiHelpers';
+import db from '../../lib/db';
+import { withOrg } from '../../lib/apiHelpers';
 
 /**
  * Manage church profile settings.
