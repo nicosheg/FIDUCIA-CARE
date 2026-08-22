@@ -120,9 +120,6 @@ export default function Layout({ children }) {
           position: relative;
           padding: 4px 0;
           transition: color 0.3s, text-shadow 0.3s;
-          background: none;
-          border: none;
-          cursor: pointer;
         }
         .navLink.active {
           color: #D4AF37;
@@ -141,12 +138,18 @@ export default function Layout({ children }) {
           border-radius: 50%;
         }
         .logout-btn {
+          background: none;
+          border: none;
+          cursor: pointer;
           color: rgba(255,255,255,0.4);
           font-size: 14px;
+          padding: 4px 0;
+          transition: color 0.3s;
+          font-weight: 400;
         }
         .logout-btn:hover {
           color: #EF4444;
-          text-shadow: 0 0 12px rgba(239,68,68,0.15);
+          text-shadow: 0 0 12px rgba(239,68,68,0.2);
         }
 
         /* ---------- Main Content ---------- */
@@ -287,4 +290,4 @@ export default function Layout({ children }) {
       `}</style>
     </>
   );
-  
+    }
