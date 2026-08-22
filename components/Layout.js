@@ -24,23 +24,11 @@ export default function Layout({ children }) {
         <Link href="/" className={router.pathname === '/' ? 'navLink active' : 'navLink'}>
           Home
         </Link>
-        <Link href="/scan" className={router.pathname === '/scan' ? 'navLink active' : 'navLink'}>
-          Scan
+        <Link href="/people" className={router.pathname === '/people' ? 'navLink active' : 'navLink'}>
+          People
         </Link>
-        <Link href="/attendance" className={router.pathname === '/attendance' ? 'navLink active' : 'navLink'}>
-          Attendance
-        </Link>
-        <Link href="/care-queue" className={router.pathname === '/care-queue' ? 'navLink active' : 'navLink'}>
-          Care Queue
-        </Link>
-        <Link href="/community" className={router.pathname === '/community' ? 'navLink active' : 'navLink'}>
-          Community
-        </Link>
-        <Link href="/review-center" className={router.pathname === '/review-center' ? 'navLink active' : 'navLink'}>
-          Review Center
-        </Link>
-        <Link href="/church-profile" className={router.pathname === '/church-profile' ? 'navLink active' : 'navLink'}>
-          Church Profile
+        <Link href="/profile" className={router.pathname === '/profile' ? 'navLink active' : 'navLink'}>
+          Profile
         </Link>
         <button onClick={handleLogout} className="navLink logout-btn">
           Logout
