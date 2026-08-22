@@ -1,13 +1,14 @@
 // pages/api/people/delete.js
 import pool from '../../../lib/db';
+import { withAdmin } from '../../../lib/apiHelpers';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { id, ids } = req.body;
-  const orgId = req.query.organization_id || req.body?.organization_id || 'demo-org';
+  const orgId = req.org.id;
 
   let deleteIds = [];
   if (ids && Array.isArray(ids) && ids.length > 0) {
@@ -44,7 +45,6 @@ export default async function handler(req, res) {
     // Delete dependent records using people_id
     await client.query(`DELETE FROM attendance_records WHERE people_id = ANY($1)`, [existingIds]);
     await client.query(`DELETE FROM timeline_events WHERE people_id = ANY($1)`, [existingIds]);
-    // Optional tables (if exist, they will be skipped if not)
     await deleteFromTableIfExists(client, 'follow_up_logs', 'people_id', existingIds);
     await deleteFromTableIfExists(client, 'usher_marks', 'people_id', existingIds);
     await deleteFromTableIfExists(client, 'care_queue', 'people_id', existingIds);
@@ -102,3 +102,5 @@ async function deleteFromTableIfExists(client, tableName, columnName, ids) {
     await client.query(`DELETE FROM ${tableName} WHERE ${columnName} = ANY($1)`, [ids]);
   }
 }
+
+export default withAdmin(handler);
