@@ -1,8 +1,8 @@
+// pages/session.js
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Layout from '../components/Layout';
-
-const CHURCH_ID = 'demo-org';
+import { supabase } from '../lib/supabaseClient';
 
 export default function SessionPage() {
   const router = useRouter();
@@ -14,9 +14,16 @@ export default function SessionPage() {
   const [editBody, setEditBody] = useState('');
 
   useEffect(() => {
-    fetch(`/api/templates?church_id=${CHURCH_ID}`)
-      .then(r => r.json())
-      .then(data => { if (data && typeof data === 'object') setTemplates(data); });
+    async function fetchTemplates() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const res = await fetch('/api/templates', {
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
+      });
+      const data = await res.json();
+      if (data && typeof data === 'object') setTemplates(data);
+    }
+    fetchTemplates();
   }, []);
 
   const addSection = () => {
@@ -27,10 +34,18 @@ export default function SessionPage() {
   };
 
   const startSession = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      alert('You must be logged in.');
+      return;
+    }
     const res = await fetch('/api/session/create', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: sessionName, sections, church_id: CHURCH_ID }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ name: sessionName, sections }),
     });
     const data = await res.json();
     if (data.id) {
@@ -41,10 +56,15 @@ export default function SessionPage() {
   };
 
   const saveTemplate = async (category) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
     await fetch('/api/templates', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ church_id: CHURCH_ID, category, body: editBody }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ category, body: editBody }),
     });
     setTemplates({ ...templates, [category]: editBody });
     setEditCategory(null);
