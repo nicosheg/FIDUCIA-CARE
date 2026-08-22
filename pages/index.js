@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { supabase } from '../lib/supabaseClient';
 import Layout from '../components/Layout';
+import CareQueueList from '../components/CareQueueList';
+import ScanModal from '../components/ScanModal';
 
 export default function ARIAHome() {
     const router = useRouter();
@@ -11,6 +13,7 @@ export default function ARIAHome() {
     const [brainFeed, setBrainFeed] = useState([]);
     const [recommendations, setRecommendations] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [showScanModal, setShowScanModal] = useState(false);
 
     useEffect(() => {
         async function init() {
@@ -97,6 +100,8 @@ export default function ARIAHome() {
                     </div>
                 )}
 
+                <CareQueueList />
+
                 {brainFeed.length > 0 && (
                     <div style={{ marginBottom: 32 }}>
                         <h2 style={{ fontSize: 20, fontWeight: 500, color: '#f0f0f0', marginBottom: 12 }}>Intelligence Feed</h2>
@@ -134,12 +139,15 @@ export default function ARIAHome() {
                     </div>
                 )}
 
-                <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
-                    <a href="/scan" className="fiducia-button fiducia-button-primary">Scan Register</a>
-                    <a href="/community" className="fiducia-button fiducia-button-secondary">Community</a>
-                    <a href="/review-center" className="fiducia-button fiducia-button-ghost">Review Center</a>
+                <div style={{ display: 'flex', gap: 12, marginTop: 20, flexWrap: 'wrap' }}>
+                    <button onClick={() => setShowScanModal(true)} className="fiducia-button fiducia-button-primary">Scan Register</button>
+                    <a href="/people?tab=community" className="fiducia-button fiducia-button-secondary">Community</a>
+                    <a href="/people?tab=review" className="fiducia-button fiducia-button-ghost">Review Center</a>
+                    <a href="/people?tab=attendance" className="fiducia-button fiducia-button-ghost">Attendance</a>
                 </div>
             </div>
+
+            <ScanModal isOpen={showScanModal} onClose={() => setShowScanModal(false)} />
         </Layout>
     );
             }
