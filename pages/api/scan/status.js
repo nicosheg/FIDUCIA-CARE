@@ -1,29 +1,49 @@
 // pages/api/scan/status.js
 import pool from '../../../lib/db';
+import { withOrg } from '../../../lib/apiHelpers';
 
-function safeParseResult(result) {
-  if (result === null || result === undefined) return null;
-  if (typeof result === 'object') return result;
-  if (typeof result === 'string') {
-    try { return JSON.parse(result); } catch { return { raw: result }; }
-  }
-  return { raw: result };
-}
-
-export default async function handler(req, res) {
+/**
+ * Get the status of a scan job.
+ * Only returns data if the job belongs to the user's organization.
+ */
+async function handler(req, res) {
   const jobId = req.query.job_id;
-  if (!jobId) return res.status(400).json({ error: 'Missing job_id' });
+  if (!jobId) {
+    return res.status(400).json({ error: 'Missing job_id' });
+  }
+
+  const orgId = req.org.id;
 
   try {
+    // Fetch job and verify organization ownership in one query
     const jobRes = await pool.query(
       `SELECT id, status, progress, result, retry_count,
               started_at, last_progress_at, heartbeat, duration_ms, provider_used
-       FROM scan_jobs WHERE id = $1`,
-      [jobId]
+       FROM scan_jobs
+       WHERE id = $1 AND organization_id = $2`,
+      [jobId, orgId]
     );
-    if (jobRes.rows.length === 0) return res.status(404).json({ error: 'Job not found' });
+
+    if (jobRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
 
     const job = jobRes.rows[0];
+    // ... (rest of the safeParseResult and progress message logic remains unchanged)
+    // We'll copy the existing logic for building the response.
+
+    // --- Reuse the existing response building logic from the original file ---
+    // (I'll include it below for completeness)
+
+    function safeParseResult(result) {
+      if (result === null || result === undefined) return null;
+      if (typeof result === 'object') return result;
+      if (typeof result === 'string') {
+        try { return JSON.parse(result); } catch { return { raw: result }; }
+      }
+      return { raw: result };
+    }
+
     const resultObj = safeParseResult(job.result);
     let elapsed = 0;
     if (job.started_at) {
@@ -44,7 +64,6 @@ export default async function handler(req, res) {
     else if (state === 'retrying') message = resultObj?.message || 'ARIA is taking a little longer than usual…';
     else if (state === 'complete') message = 'Scan complete.';
     else if (state === 'failed') {
-      // Read structured error if present
       if (resultObj && resultObj.error) {
         const err = resultObj.error;
         message = err.userMessage || 'ARIA could not complete this scan safely.';
@@ -53,10 +72,8 @@ export default async function handler(req, res) {
           stage: err.stage || 'unknown',
           details: err.details || null,
         };
-        // Also log error details server-side
         console.error(`Scan ${jobId} failed: stage=${err.stage}, code=${err.code}, techMsg=${err.message}`);
       } else {
-        // Fallback for legacy failures
         message = resultObj?.error || 'ARIA could not read the register. Please try again with a clearer photo.';
         if (message.includes('Rate limit') || message.includes('rate limit')) {
           message = 'ARIA is very busy right now. Please try again in a few minutes.';
@@ -81,4 +98,6 @@ export default async function handler(req, res) {
     console.error('Status error:', err);
     res.status(500).json({ error: 'ARIA is having trouble. Please try again.' });
   }
-      }
+}
+
+export default withOrg(handler);
