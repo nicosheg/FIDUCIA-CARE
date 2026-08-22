@@ -9,6 +9,9 @@ _Single source of truth. Point every AI session (DeepSeek, ChatGPT, Claude, or a
 - Check every proposed fix against the **Known Mistakes Checklist** (Section 7) before submitting it.
 - Do not add new features or expand scope beyond what's in the **Current Phase** (Section 6) without explicit approval.
 - When this file and reality disagree, reality wins — update this file, don't trust it blindly.
+- **Findings must be confirmed from actually re-read code, not recalled/inferred from earlier conversation.** State clearly which findings are confirmed vs. still unknown/unverified. This distinction has mattered in practice — treat it as a hard rule, not a suggestion.
+- **Role division:** Nicholas = vision/final decision. ChatGPT/Claude = architecture, audit, verification, review. DeepSeek = implementation only, per an already-frozen spec. DeepSeek should not redesign architecture mid-implementation.
+- **Workflow for any large change:** Architecture Freeze → Dependency Audit (trace data ownership/API/consumers for every affected feature, based on real code) → Experience/Implementation Plan → Build → Review. Do not skip straight to code on anything touching auth, data model, or navigation structure.
 
 ---
 
@@ -112,18 +115,35 @@ ARIA (explains, recommends, drafts — human stays in control of sending)
 
 ## 6. CURRENT PHASE STATUS (update this section often — this is the part most likely to go stale)
 
-**Auth migration (in progress):**
-- ✅ `organizations` table, Supabase Auth trigger, `withOrg` middleware built
-- ⚠️ NOT all pages/endpoints migrated off hardcoded `demo-org` yet — audit still needed file by file
-- 🐛 Known outstanding bug: Attendance page still shows a manual "Your Name (for claiming groups)" text field instead of pulling identity from the logged-in session — leftover from pre-auth version, needs fixing
+**Auth: ✅ WORKING END TO END, CONFIRMED (as of this session).**
+- Real signup (`/signup`), login (`/login`, password + magic link), and logout are all functional and tested with a genuinely new account
+- `ensureCareUser()` fixed: now called inside `getCurrentCareUser()` (was previously only triggered by `withOrg`, causing new signups to 401-loop forever); insert now uses `RETURNING id` (was previously returning `id: null` for new users)
+- `lib/supabaseClient.js` was crashing every page that imported it, for two stacked reasons, both fixed:
+  1. `NEXT_PUBLIC_SUPABASE_URL` had `/rest/v1/` incorrectly appended — must be the bare project URL only (`https://xxxx.supabase.co`)
+  2. The file created both the browser-safe `supabase` client AND the server-only `supabaseAdmin` client (using `SUPABASE_SERVICE_ROLE_KEY`) in the same module — importing either one in a page pulled in both, and the admin key is correctly `undefined` in the browser, crashing `createClient()` on load. **Fixed by splitting into `lib/supabaseClient.js` (browser+server safe) and `lib/supabaseAdmin.js` (server/API-routes only — audit that nothing under `pages/` or `components/` imports this).**
+- Org isolation confirmed working correctly: a fresh signup correctly shows 0 people, 0 care queue items, 0 review items — all consistent, no leakage from old `demo-org` test data
+- Logout button added to nav, functional
+- 🐛 Still open, minor: Attendance page's "Your Name (for claiming groups)" field is now pre-filled with the real logged-in name but is still an editable text input rather than a locked display — confirm with DeepSeek whether editability is intentional or should be locked
+- ⚠️ Supabase's default email service has a low rate limit on the free tier — hit during heavy testing today. Fine for solo testing; **before real launch, connect a real SMTP provider (Resend or SendGrid) under Supabase → Authentication → SMTP Settings.** Pre-launch checklist item, not urgent now.
+
+**Fixed today: Review Center org-isolation bug.** Was showing real named people/duplicate-conflict data (from old `demo-org` data) for a brand-new organization that should have shown 0. Confirmed fixed — now correctly shows 0 pending reviews for a fresh org, consistent with Community (0 lives remembered) and Care Queue (0 items).
 
 **Scan pipeline:** Stable (vision-model-direct extraction, JSON-or-abort validation, hard name-validation filters, normalized duplicate detection all implemented). Not yet perfect but no longer corrupting the database. Known good state — do not regress.
 
-**Pages affected by auth migration, status uncertain until re-verified:** Home/ARIA Today, Community, Care Queue, Attendance, Review Center. Backend logic is further along than frontend wiring.
+**Care Queue:** Was showing "0 items" — appears to be *correct* behavior for a fresh org with no confirmed participation history yet, not a bug. Re-verify once a real org has actual attendance/engagement data flowing through it.
 
-**Care Queue:** Has shown "0 items" despite real uncontacted people existing — root cause suspected to be either the `engagement_cases` generation engine not running regularly, or thresholds not yet met. Needs verification once auth migration settles.
+**Page consolidation — refined architecture, NOT YET BUILT, currently entering Phase 1 (Architecture Freeze) of a 5-phase rollout:**
 
-**Page consolidation (agreed direction, not yet built):** Reduce from 7 pages to 3 — **Home** (ARIA Today briefing + Care Queue + quick actions), **Community** (Community directory + Review Center + Attendance, as tabs), **Settings** (Church Profile + ARIA config + account). Scan becomes a modal/action, not a standalone page.
+Final structure locked as **HOME · PEOPLE · PROFILE** (supersedes earlier "Home/Community/Settings" draft):
+- **HOME** — "What needs my attention?" ARIA Today briefing, Care Queue/priority signals, quick Scan action, recent activity. Should feel like ARIA is watching over the community, not displaying database records.
+- **PEOPLE** — "Who are we caring for?" One living workspace with Community/Attendance/Review as tabs within a single connected experience (not 3 separate tools) — tapping a person should feel like going deeper into their story, not entering another app. Scan becomes an action available from here/Home, not a standalone destination.
+- **PROFILE** — "How is FIDUCIA CARE configured?" Church Profile, service times/programs, ARIA config, account, team/admin settings, logout.
+
+**Core principle guiding the rebuild (not just a visual merge):** every feature is a different view of "the people entrusted to this organization" — attendance, reviews, and care queue all revolve around the person, not separate concerns. Real state changes ("ARIA found 3 new people," "2 identities need review") are what make it feel alive — motion/design reinforces this, never fakes it in the absence of real data.
+
+**Migration approach:** keep old pages temporarily, redirect them into the new structure (`/scan` → Home, `/attendance` → `People?tab=attendance`, `/community` → `People?tab=community`, `/review-center` → `People?tab=review`, `/care-queue` → Home, `/church-profile` → Profile). Remove old implementations only after the new structure is tested and confirmed.
+
+**Next step:** DeepSeek to perform Phase 2 (Dependency Audit) — for every existing feature, trace where its data comes from, who owns it, which API it calls, what happens after the action, and what else should see the result — based on actually re-reading the current code, not recalled from memory. Report findings before any restructuring code is written. Do not modify or delete anything during this audit step.
 
 ---
 
@@ -136,16 +156,21 @@ ARIA (explains, recommends, drafts — human stays in control of sending)
 - [ ] Is duplicate detection using normalized comparison (strip punctuation/markdown/whitespace, lowercase), not exact string match?
 - [ ] Does this match the existing code patterns/column names elsewhere in the file, not assumed/guessed?
 - [ ] For anything reading `scan_jobs.result` or other JSONB columns — remember `pg` auto-parses JSONB; do NOT call `JSON.parse()` on it again.
+- [ ] Does any file that's imported by browser/page code also create a `supabaseAdmin`/service-role client? Never mix browser-safe and server-only Supabase clients in the same importable module — split them.
+- [ ] `NEXT_PUBLIC_*` env vars are inlined at **build time**, not read live. If a value changes on Render, a normal redeploy may not pick it up — use "Clear build cache & deploy" to force a fresh inline.
+- [ ] Does `NEXT_PUBLIC_SUPABASE_URL` contain anything beyond the bare project URL (e.g. an accidental `/rest/v1/` suffix)? The client library appends paths itself — the base var must be clean.
+- [ ] Does error-handling code display the *real* error message (`error.message`)? Never `JSON.stringify(error)` on a real Error/Supabase error object — this silently produces `{}` since `.message` is non-enumerable, hiding the actual problem from both user and developer.
+- [ ] Is any assumption about auth/org state based on inferred/remembered context, or was the actual relevant file re-read in this session? State which, explicitly.
 
 ---
 
 ## 8. BUILD PRIORITY ORDER
 
 **Now:**
-1. Finish auth migration — audit every file for remaining `demo-org` references, fix the Attendance page name-field bug
-2. Verify Care Queue is actually populating from `engagement_cases`
-3. Implement Present/Unobserved/Confirmed Absent state model properly (not just `present = true` always)
-4. 3-page consolidation
+1. ~~Finish auth migration~~ — ✅ done, confirmed working end to end
+2. HOME/PEOPLE/PROFILE consolidation — Phase 2 (Dependency Audit) is the immediate next step, per Section 0's workflow. Do not write restructuring code until the audit is reviewed.
+3. Once consolidation lands: implement Present/Unobserved/Confirmed Absent state model properly (not just `present = true` always) and re-verify Care Queue populates correctly with real engagement data
+4. Minor: resolve Attendance page's editable-vs-locked name field
 
 **Phase 2 (after above is stable):**
 - Session review UX (🟢/🟡/🔴 exception-based, not full manual approval)
