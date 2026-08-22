@@ -1,13 +1,30 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+
+  // Add redirects for old routes to new consolidated surfaces
   async redirects() {
     return [
-      { source: '/members', destination: '/community', permanent: true },
+      // Scan remains a full page – redirect old /scan to Home (which has a Scan Register button)
+      { source: '/scan', destination: '/', permanent: false },
+
+      // Attendance → People → Attendance tab
+      { source: '/attendance', destination: '/people?tab=attendance', permanent: false },
+
+      // Care Queue → Home (integrated)
+      { source: '/care-queue', destination: '/', permanent: false },
+
+      // Community → People → Community tab
+      { source: '/community', destination: '/people?tab=community', permanent: false },
+
+      // Review Center → People → Review tab (handle both file names)
+      { source: '/review-center', destination: '/people?tab=review', permanent: false },
+      { source: '/reviewer-center', destination: '/people?tab=review', permanent: false },
+
+      // Church Profile → Profile
+      { source: '/church-profile', destination: '/profile', permanent: false },
     ];
   },
-  env: {
-    NEXT_PUBLIC_APP_NAME: 'FIDUCIA CARE',
-  },
 };
+
 module.exports = nextConfig;
