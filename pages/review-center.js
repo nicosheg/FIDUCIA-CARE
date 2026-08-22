@@ -10,6 +10,7 @@ export default function ReviewCenter() {
   const [message, setMessage] = useState('');
 
   const fetchReviews = async () => {
+    setLoading(true);
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       setLoading(false);
@@ -17,17 +18,20 @@ export default function ReviewCenter() {
     }
     try {
       const res = await fetch('/api/identity/review-items', {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
+        headers: { 'Authorization': `Bearer ${session.access_token}` },
       });
       const data = await res.json();
       if (data.items) {
         setReviews(data.items);
         setStats(data.stats);
+      } else {
+        setReviews([]);
+        setStats({});
       }
     } catch (e) {
       console.error('Fetch reviews error:', e);
+      setReviews([]);
+      setStats({});
     } finally {
       setLoading(false);
     }
@@ -71,10 +75,28 @@ export default function ReviewCenter() {
     }
   };
 
+  // Shimmer skeleton
   if (loading) {
     return (
       <Layout>
-        <div style={{ padding: 20, color: '#f0f0f0' }}>Loading reviews...</div>
+        <div style={{ maxWidth: 900, margin: '0 auto', padding: 20 }}>
+          <div className="shimmer" style={{ height: 36, width: '40%', borderRadius: 8, marginBottom: 24 }} />
+          <div className="shimmer" style={{ height: 20, width: '60%', borderRadius: 8, marginBottom: 40 }} />
+          {[1, 2, 3].map(i => (
+            <div key={i} className="fiducia-card shimmer" style={{ padding: 20, height: 120, marginBottom: 16 }} />
+          ))}
+        </div>
+        <style jsx>{`
+          .shimmer {
+            background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s ease-in-out infinite;
+          }
+          @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+          }
+        `}</style>
       </Layout>
     );
   }
@@ -185,4 +207,4 @@ export default function ReviewCenter() {
       </div>
     </Layout>
   );
-                 }
+  }
