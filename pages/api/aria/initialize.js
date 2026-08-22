@@ -1,12 +1,13 @@
 // pages/api/aria/initialize.js
 import { initializeCommunity } from '../../../lib/aria/director';
+import { withAdmin } from '../../../lib/apiHelpers';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const orgId = req.body?.organization_id || req.query?.organization_id || 'demo-org';
+  const orgId = req.org.id;
 
   try {
     await initializeCommunity(orgId);
@@ -16,3 +17,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: err.message });
   }
 }
+
+export default withAdmin(handler);
