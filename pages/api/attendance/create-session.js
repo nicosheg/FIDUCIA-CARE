@@ -1,14 +1,16 @@
+// pages/api/attendance/create-session.js
 import pool from '../../../lib/db';
+import { withOrg } from '../../../lib/apiHelpers';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { organization_id, name, service_type, group_ids } = req.body;
+  const { name, service_type, group_ids } = req.body;
   if (!name) return res.status(400).json({ error: 'Session name required' });
 
-  const orgId = organization_id || 'demo-org';
-  const client = await pool.connect();
+  const orgId = req.org.id;
 
+  const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
@@ -48,3 +50,5 @@ export default async function handler(req, res) {
     client.release();
   }
 }
+
+export default withOrg(handler);
