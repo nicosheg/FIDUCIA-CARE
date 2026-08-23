@@ -12,10 +12,13 @@ async function handler(req, res) {
   }
 
   const { image_base64, program_name } = req.body;
-  if (!image_base64) {
-    console.log('[SCAN] No image data');
-    return res.status(400).json({ error: 'No image data' });
+  // Guard against undefined first
+  if (!image_base64 || typeof image_base64 !== 'string' || image_base64.length < 100) {
+    console.error('[SCAN] Image data missing or too short');
+    return res.status(400).json({ error: 'Image data is empty or invalid' });
   }
+
+  console.log('[SCAN] Image received, length:', image_base64.length);
 
   const orgId = req.org.id;
   console.log('[SCAN] Organization ID:', orgId);
@@ -23,7 +26,6 @@ async function handler(req, res) {
   const programName = program_name || 'GIBEON';
 
   try {
-    // Insert scan job
     const jobRes = await pool.query(
       `INSERT INTO scan_jobs (organization_id, status) VALUES ($1, 'pending') RETURNING id`,
       [orgId]
