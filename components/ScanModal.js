@@ -29,9 +29,7 @@ export default function ScanModal({ isOpen, onClose }) {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (timerRef.current) clearInterval(timerRef.current);
-      // Clean up scan state on unmount if still processing?
-      // We'll not clear state when modal closes, to allow resume? But better to clear on close.
-      // We'll handle clear on close.
+      // Clean up scan state on close handled by handleClose
     };
   }, []);
 
@@ -40,12 +38,120 @@ export default function ScanModal({ isOpen, onClose }) {
     syncState();
   };
 
-  const preprocessImage = (file) => { /* unchanged */ };
+  // ── Updated preprocessImage: 1600px, high quality, error handling ──
+  const preprocessImage = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          const MAX_SIZE = 1600;
+          let width = img.width;
+          let height = img.height;
+          if (width > height && width > MAX_SIZE) {
+            height = Math.round((height / width) * MAX_SIZE);
+            width = MAX_SIZE;
+          } else if (height > MAX_SIZE) {
+            width = Math.round((width / height) * MAX_SIZE);
+            height = MAX_SIZE;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+          if (!dataUrl) {
+            reject(new Error('Failed to convert image to base64'));
+            return;
+          }
+          const base64 = dataUrl.split(',')[1];
+          if (!base64 || base64.length < 100) {
+            reject(new Error('Image encoding produced empty data'));
+            return;
+          }
+          resolve(base64);
+        };
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = event.target.result;
+      };
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+  };
 
-  const startPolling = (jobId) => { /* unchanged */ };
+  const startPolling = (jobId) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+    let seconds = 0;
+    setElapsedSeconds(0);
+    timerRef.current = setInterval(() => {
+      seconds++;
+      setElapsedSeconds(seconds);
+    }, 1000);
 
-  const revealResults = async (resultData) => { /* unchanged */ };
+    pollRef.current = setInterval(async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      try {
+        const res = await fetch(`/api/scan/status?job_id=${jobId}`, {
+          headers: { 'Authorization': `Bearer ${session.access_token}` },
+        });
+        if (!res.ok) {
+          console.error('Polling error:', await res.text());
+          return;
+        }
+        const data = await res.json();
+        if (data.status === 'processing') {
+          setProgressMessage(data.message || 'ARIA is processing…');
+          if (data.progress) {
+            const msgs = {
+              enhancing: 'ARIA is enhancing the image clarity…',
+              reading_handwriting: 'ARIA is reading the handwriting…',
+              validating: 'ARIA is validating the extracted data…',
+              matching_community: 'ARIA is comparing with your community…',
+              building_memory: 'ARIA is saving the verified records…',
+            };
+            setProgressMessage(msgs[data.progress] || 'ARIA is working…');
+          }
+        } else if (data.status === 'complete') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (timerRef.current) clearInterval(timerRef.current);
+          const result = data.result;
+          if (result && result.summary) {
+            const summary = {
+              total: result.present_count || 0,
+              newVisitors: result.new_members || 0,
+              returning: result.updated || 0,
+              duplicates: result.duplicates?.length || 0,
+              needsReview: result.needs_review?.length || 0,
+            };
+            setCompletionTimestamp(new Date().toLocaleString());
+            updateState({
+              stage: 'complete',
+              summary,
+            });
+            setCelebration(true);
+            setTimeout(() => setCelebration(false), 600);
+          } else {
+            updateState({ stage: 'complete', summary: { total: 0 } });
+          }
+        } else if (data.status === 'failed') {
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (timerRef.current) clearInterval(timerRef.current);
+          updateState({ stage: 'error', message: data.message || 'Scan failed' });
+        }
+      } catch (err) {
+        console.error('Polling error:', err);
+      }
+    }, 1500);
+  };
 
+  const revealResults = async (resultData) => {
+    // Not used in this version – kept for compatibility
+  };
+
+  // ── Updated handleFile with error handling and base64 check ──
   const handleFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -53,7 +159,19 @@ export default function ScanModal({ isOpen, onClose }) {
 
     updateState({ stage: 'processing', scanningLine: true });
     setProgressMessage('ARIA is preparing the image…');
-    const base64 = await preprocessImage(file);
+
+    let base64;
+    try {
+      base64 = await preprocessImage(file);
+      // Final boundary check
+      if (!base64 || base64.length < 100) {
+        throw new Error('Image could not be prepared for scanning.');
+      }
+    } catch (err) {
+      console.error('Image preprocessing error:', err);
+      updateState({ stage: 'error', message: err.message || 'Failed to process image' });
+      return;
+    }
 
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
@@ -73,22 +191,28 @@ export default function ScanModal({ isOpen, onClose }) {
           program_name: programName.trim() || 'GIBEON',
         }),
       });
+
       const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to start scan');
+      }
+
       if (data.job_id) {
         updateState({ stage: 'processing', jobId: data.job_id, scanningLine: true });
         startPolling(data.job_id);
       } else {
-        updateState({ stage: 'error', message: 'Failed to start scan' });
+        throw new Error('No job ID returned');
       }
     } catch (err) {
-      updateState({ stage: 'error', message: err.message });
+      console.error('Scan start error:', err);
+      updateState({ stage: 'error', message: err.message || 'Failed to start scan' });
     }
   };
 
   const { stage, scanningLine, revealedPeople, ariaMessages, summary, message } = scanState;
 
   const handleClose = () => {
-    // Clean up polling if any
     if (pollRef.current) clearInterval(pollRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
     clearScanState();
@@ -288,4 +412,4 @@ export default function ScanModal({ isOpen, onClose }) {
       `}</style>
     </div>
   );
-}
+              }
