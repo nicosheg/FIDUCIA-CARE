@@ -1,7 +1,7 @@
 // pages/api/aria/observations.js
-import pool from '../../lib/db';
-import { withOrg } from '../../lib/apiHelpers';
-import { getAggregatedObservations } from '../../lib/aria/observationEngine';
+import pool from '../../../lib/db';
+import { withOrg } from '../../../lib/apiHelpers';
+import { getAggregatedObservations } from '../../../lib/aria/observationEngine';
 
 async function handler(req, res) {
   const orgId = req.org.id;
@@ -10,7 +10,7 @@ async function handler(req, res) {
   if (aggregated === 'true') {
     try {
       const summaries = await getAggregatedObservations(orgId);
-      // Also fetch top individual observations if needed
+      // Also fetch top individual observations
       const topObs = await pool.query(
         `SELECT o.*, p.first_name, p.phone
          FROM aria_observations o
