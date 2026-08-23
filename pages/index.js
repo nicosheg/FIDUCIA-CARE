@@ -12,7 +12,7 @@ export default function ARIAHome() {
     const [priority, setPriority] = useState([]);
     const [brainFeed, setBrainFeed] = useState([]);
     const [recommendations, setRecommendations] = useState([]);
-    const [ariaObservations, setAriaObservations] = useState([]);
+    const [ariaData, setAriaData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [showScanModal, setShowScanModal] = useState(false);
 
@@ -26,12 +26,12 @@ export default function ARIAHome() {
 
             try {
                 const headers = { 'Authorization': `Bearer ${session.access_token}` };
-                const [briefRes, prioRes, feedRes, recRes, obsRes] = await Promise.all([
+                const [briefRes, prioRes, feedRes, recRes, ariaRes] = await Promise.all([
                     fetch('/api/daily-briefing/latest', { headers }),
                     fetch('/api/priority-queue?limit=10', { headers }),
                     fetch('/api/brain-feed?limit=10', { headers }),
                     fetch('/api/recommendations', { headers }),
-                    fetch('/api/aria/observations?limit=5', { headers }),
+                    fetch('/api/aria/observations?aggregated=true&limit=10', { headers }),
                 ]);
 
                 const brief = briefRes.ok ? await briefRes.json() : null;
@@ -46,8 +46,8 @@ export default function ARIAHome() {
                 const recs = recRes.ok ? await recRes.json() : [];
                 setRecommendations(recs);
 
-                const obs = obsRes.ok ? await obsRes.json() : [];
-                setAriaObservations(obs);
+                const aria = ariaRes.ok ? await ariaRes.json() : null;
+                setAriaData(aria);
             } catch (e) {
                 console.error('ARIA Today load error:', e);
             } finally {
@@ -74,6 +74,50 @@ export default function ARIAHome() {
 
     const summary = briefing?.summary || 'Good morning. ARIA is ready.';
 
+    // Render aggregated summaries
+    const renderSummaries = () => {
+        if (!ariaData?.summaries || ariaData.summaries.length === 0) return null;
+        return ariaData.summaries.map((s, idx) => (
+            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <span style={{ color: '#f0f0f0' }}>{s.type.replace(/_/g, ' ')}</span>
+                <span style={{ color: 'rgba(255,255,255,0.6)' }}>
+                    {s.count} {s.count === 1 ? 'item' : 'items'} · Avg attention: {Math.round(s.avg_attention)}
+                </span>
+            </div>
+        ));
+    };
+
+    const renderTopObservations = () => {
+        if (!ariaData?.top || ariaData.top.length === 0) return null;
+        return ariaData.top.slice(0, 5).map((obs, idx) => (
+            <div key={idx} className="fiducia-card" style={{ padding: '12px 20px', marginBottom: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{
+                        display: 'inline-block',
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: obs.severity === 'critical' ? '#EF4444' :
+                                   obs.severity === 'high' ? '#F59E0B' :
+                                   obs.severity === 'medium' ? '#FBBF24' : '#34D399',
+                    }} />
+                    <span style={{ color: '#f0f0f0', fontWeight: 500 }}>{obs.type.replace(/_/g, ' ')}</span>
+                    {obs.first_name && <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>— {obs.first_name}</span>}
+                </div>
+                <div style={{ marginTop: 4 }}>
+                    <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>
+                        Confidence: {Math.round(obs.confidence * 100)}% · Attention: {obs.attention_score}
+                    </span>
+                    {obs.evidence && obs.evidence.inference && (
+                        <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>
+                            {obs.evidence.inference}
+                        </p>
+                    )}
+                </div>
+            </div>
+        ));
+    };
+
     return (
         <Layout>
             <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 20px' }}>
@@ -84,45 +128,31 @@ export default function ARIAHome() {
                     {summary}
                 </p>
 
-                {/* ARIA Observations (highest attention) */}
-                {ariaObservations.length > 0 && (
+                {/* ARIA Summaries */}
+                {ariaData?.summaries && ariaData.summaries.length > 0 && (
                     <div style={{ marginBottom: 32 }}>
                         <h2 style={{ fontSize: 20, fontWeight: 500, color: '#f0f0f0', marginBottom: 12 }}>
                             What Matters Now
                         </h2>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {ariaObservations.map((obs, idx) => (
-                                <div key={idx} className="fiducia-card" style={{ padding: '12px 20px', marginBottom: 0 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{
-                                            display: 'inline-block',
-                                            width: 8,
-                                            height: 8,
-                                            borderRadius: '50%',
-                                            background: obs.severity === 'critical' ? '#EF4444' :
-                                                       obs.severity === 'high' ? '#F59E0B' :
-                                                       obs.severity === 'medium' ? '#FBBF24' : '#34D399',
-                                        }} />
-                                        <span style={{ color: '#f0f0f0', fontWeight: 500 }}>{obs.type.replace(/_/g, ' ')}</span>
-                                        {obs.first_name && <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 14 }}>— {obs.first_name}</span>}
-                                    </div>
-                                    <div style={{ marginTop: 4 }}>
-                                        <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>
-                                            Confidence: {Math.round(obs.confidence * 100)}% · Attention: {obs.attention_score}
-                                        </span>
-                                        {obs.evidence && obs.evidence.inference && (
-                                            <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>
-                                                {obs.evidence.inference}
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-                            ))}
+                        <div className="fiducia-card" style={{ padding: '16px 20px' }}>
+                            {renderSummaries()}
                         </div>
                     </div>
                 )}
 
-                {/* Priority Queue */}
+                {/* Top Observations */}
+                {ariaData?.top && ariaData.top.length > 0 && (
+                    <div style={{ marginBottom: 32 }}>
+                        <h2 style={{ fontSize: 20, fontWeight: 500, color: '#f0f0f0', marginBottom: 12 }}>
+                            Top Signals
+                        </h2>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {renderTopObservations()}
+                        </div>
+                    </div>
+                )}
+
+                {/* Priority Queue (existing) */}
                 {priority.length > 0 ? (
                     <div style={{ marginBottom: 32 }}>
                         <h2 style={{ fontSize: 20, fontWeight: 500, color: '#f0f0f0', marginBottom: 12 }}>Top Priority</h2>
@@ -194,4 +224,4 @@ export default function ARIAHome() {
             <ScanModal isOpen={showScanModal} onClose={() => setShowScanModal(false)} />
         </Layout>
     );
-                           }
+        }
