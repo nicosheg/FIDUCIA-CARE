@@ -1,6 +1,6 @@
 // pages/api/aria/observations.js
-import pool from '../../lib/db';
-import { withOrg } from '../../lib/apiHelpers';
+import pool from '../../../lib/db';
+import { withOrg } from '../../../lib/apiHelpers';
 
 async function handler(req, res) {
   const orgId = req.org.id;
@@ -14,8 +14,13 @@ async function handler(req, res) {
     ORDER BY o.attention_score DESC
     LIMIT $2
   `;
-  const result = await pool.query(query, [orgId, limit]);
-  res.status(200).json(result.rows);
+  try {
+    const result = await pool.query(query, [orgId, limit]);
+    res.status(200).json(result.rows);
+  } catch (err) {
+    console.error('Error fetching ARIA observations:', err);
+    res.status(500).json({ error: err.message });
+  }
 }
 
 export default withOrg(handler);
