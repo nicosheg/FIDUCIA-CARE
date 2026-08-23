@@ -1,14 +1,15 @@
 // pages/api/scan/start.js
 import pool from '../../../lib/db';
+import { withOrg } from '../../../lib/apiHelpers';
 import { processVisionJob } from '../../../lib/visionProcessor';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { image_base64, organization_id, program_name } = req.body;
+  const { image_base64, program_name } = req.body;
   if (!image_base64) return res.status(400).json({ error: 'No image data' });
 
-  const orgId = organization_id || 'demo-org';   // UPDATED: was church_id
+  const orgId = req.org.id; // from withOrg
   const programName = program_name || 'GIBEON';
 
   try {
@@ -31,3 +32,5 @@ export default async function handler(req, res) {
     res.status(500).json({ error: error.message });
   }
 }
+
+export default withOrg(handler);
