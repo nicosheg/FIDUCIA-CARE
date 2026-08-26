@@ -2,131 +2,358 @@
 import pool from '../../lib/db';
 import { normalizePhone } from '../../lib/phoneUtils';
 import { withOrg } from '../../lib/apiHelpers';
+import { emitAriaEvent } from '../../lib/aria/eventEmitter';
+import { processAriaEvent } from '../../lib/aria/eventProcessor';
 
 async function handler(req, res) {
-  const orgId = req.org.id; // From withOrg — NEVER from client
+  const orgId = req.org.id;
 
-  // ---------- GET ----------
+  // =========================================================
+  // GET
+  // =========================================================
+
   if (req.method === 'GET') {
-    const includeDeleted = req.query.include_deleted === 'true';
-
-    const baseQuery = `
-      SELECT p.*,
-             (SELECT MAX(ar.attendance_date) FROM attendance_records ar
-              WHERE ar.people_id = p.id AND ar.present = true) AS last_attended_date,
-             (SELECT MAX(te.created_at) FROM timeline_events te
-              WHERE te.people_id = p.id
-                AND te.event_type IN ('message_sent','call','note','aria_draft')) AS last_contacted
-      FROM people p
-      WHERE p.organization_id = $1
-        AND p.status != 'deleted'
-        AND (p.living_truth IS NULL OR p.living_truth->>'status' != 'merged')
-      ORDER BY p.created_at DESC
-    `;
-
     try {
-      const { rows } = await pool.query(baseQuery, [orgId]);
-      return res.status(200).json(rows);
+      const result = await pool.query(
+        `
+          SELECT *
+          FROM people
+          WHERE organization_id = $1
+          ORDER BY first_name ASC, last_name ASC
+        `,
+        [orgId]
+      );
+
+      return res.status(200).json(result.rows);
     } catch (err) {
-      console.error('GET people error:', err);
-      return res.status(500).json({ error: err.message });
+      console.error(
+        'GET people error:',
+        err
+      );
+
+      return res.status(500).json({
+        error: err.message,
+      });
     }
   }
 
-  // ---------- POST (CREATE) ----------
-  if (req.method === 'POST') {
-    const { first_name, last_name, phone, email, type, birthday } = req.body;
-    if (!first_name) return res.status(400).json({ error: 'first_name is required' });
+  // =========================================================
+  // POST — CREATE PERSON
+  // =========================================================
 
-    const normalizedPhone = normalizePhone(phone);
-    const defaultLivingTruth = JSON.stringify({
-      status: 'alive',
-      confidence: 90,
-      source: 'canonical_record',
-      updated_at: new Date().toISOString(),
-    });
+  if (req.method === 'POST') {
+    const {
+      first_name,
+      last_name,
+      phone,
+      email,
+      type,
+      birthday,
+    } = req.body || {};
+
+    if (!first_name) {
+      return res.status(400).json({
+        error: 'first_name is required',
+      });
+    }
+
+    const normalizedPhone =
+      normalizePhone(phone);
+
+    const defaultLivingTruth =
+      JSON.stringify({
+        status: 'alive',
+        confidence: 90,
+        source: 'canonical_record',
+        updated_at:
+          new Date().toISOString(),
+      });
 
     try {
       const result = await pool.query(
-        `INSERT INTO people (organization_id, first_name, last_name, phone, email, type, birthday, living_truth)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING *`,
-        [orgId, first_name, last_name || '', normalizedPhone || null, email || '', type || 'visitor', birthday || null, defaultLivingTruth]
+        `
+          INSERT INTO people (
+            organization_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            type,
+            birthday,
+            living_truth
+          )
+          VALUES (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8
+          )
+          RETURNING *
+        `,
+        [
+          orgId,
+          first_name,
+          last_name || '',
+          normalizedPhone || null,
+          email || '',
+          type || 'visitor',
+          birthday || null,
+          defaultLivingTruth,
+        ]
       );
-      return res.status(200).json(result.rows[0]);
+
+      const newPerson =
+        result.rows[0];
+
+      /*
+       * ARIA event projection.
+       *
+       * Person persistence is intentionally independent from ARIA
+       * processing in Phase 5.1.
+       *
+       * If ARIA processing fails, the person remains successfully
+       * created. The error is logged rather than changing the
+       * successful person response.
+       */
+      try {
+        const event =
+          await emitAriaEvent({
+            organizationId: orgId,
+            personId: newPerson.id,
+            type: 'PERSON_CREATED',
+            source: 'manual',
+            actorId: req.user.id,
+
+            metadata: {
+              source: 'api',
+              user: req.user.id,
+            },
+
+            /*
+             * Deterministic because the person ID is generated
+             * by the successful person creation itself.
+             */
+            eventKey:
+              `manual:${orgId}:person:${newPerson.id}:created`,
+          });
+
+        if (event) {
+          await processAriaEvent(event);
+        }
+      } catch (err) {
+        console.error(
+          'ARIA event processing failed for person creation:',
+          err
+        );
+      }
+
+      return res.status(200).json(
+        newPerson
+      );
     } catch (err) {
-      console.error('POST person error:', err);
-      return res.status(500).json({ error: err.message });
+      console.error(
+        'POST person error:',
+        err
+      );
+
+      return res.status(500).json({
+        error: err.message,
+      });
     }
   }
 
-  // ---------- PUT (UPDATE) ----------
-  if (req.method === 'PUT') {
-    const { id, first_name, last_name, phone, type, birthday } = req.body;
-    if (!id) return res.status(400).json({ error: 'id is required' });
+  // =========================================================
+  // PUT — UPDATE PERSON
+  // =========================================================
 
-    const normalizedPhone = normalizePhone(phone);
+  if (req.method === 'PUT') {
+    const {
+      id,
+      first_name,
+      last_name,
+      phone,
+      type,
+      birthday,
+    } = req.body || {};
+
+    if (!id) {
+      return res.status(400).json({
+        error: 'id is required',
+      });
+    }
+
+    const normalizedPhone =
+      normalizePhone(phone);
 
     try {
+      /*
+       * First verify that the person belongs to this organization.
+       */
       const check = await pool.query(
-        `SELECT id FROM people WHERE id = $1 AND organization_id = $2`,
+        `
+          SELECT id
+          FROM people
+          WHERE id = $1
+            AND organization_id = $2
+        `,
         [id, orgId]
       );
+
       if (check.rows.length === 0) {
-        return res.status(404).json({ error: 'Person not found in this organization' });
+        return res.status(404).json({
+          error:
+            'Person not found in this organization',
+        });
       }
 
       const updates = [];
       const values = [];
+
       let paramCount = 1;
 
       if (first_name !== undefined) {
-        updates.push(`first_name = $${paramCount++}`);
+        updates.push(
+          `first_name = $${paramCount++}`
+        );
+
         values.push(first_name);
       }
+
       if (last_name !== undefined) {
-        updates.push(`last_name = $${paramCount++}`);
+        updates.push(
+          `last_name = $${paramCount++}`
+        );
+
         values.push(last_name);
       }
+
       if (phone !== undefined) {
-        updates.push(`phone = $${paramCount++}`);
-        values.push(normalizedPhone || null);
+        updates.push(
+          `phone = $${paramCount++}`
+        );
+
+        values.push(
+          normalizedPhone || null
+        );
       }
+
       if (type !== undefined) {
-        updates.push(`type = $${paramCount++}`);
-        values.push(type || 'visitor');
+        updates.push(
+          `type = $${paramCount++}`
+        );
+
+        values.push(
+          type || 'visitor'
+        );
       }
+
       if (birthday !== undefined) {
-        updates.push(`birthday = $${paramCount++}`);
-        values.push(birthday || null);
+        updates.push(
+          `birthday = $${paramCount++}`
+        );
+
+        values.push(
+          birthday || null
+        );
       }
 
       if (updates.length === 0) {
-        return res.status(400).json({ error: 'No fields to update' });
+        return res.status(400).json({
+          error: 'No fields to update',
+        });
       }
 
-      updates.push(`updated_at = NOW()`);
+      updates.push(
+        'updated_at = NOW()'
+      );
+
+      /*
+       * id and organization_id are deliberately appended after
+       * all dynamic update values.
+       */
       values.push(id, orgId);
 
       const query = `
         UPDATE people
         SET ${updates.join(', ')}
-        WHERE id = $${paramCount} AND organization_id = $${paramCount + 1}
+        WHERE id = $${paramCount}
+          AND organization_id = $${paramCount + 1}
         RETURNING *
       `;
 
-      const result = await pool.query(query, values);
+      const result =
+        await pool.query(
+          query,
+          values
+        );
+
       if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Person not found' });
+        return res.status(404).json({
+          error: 'Person not found',
+        });
       }
-      return res.status(200).json(result.rows[0]);
+
+      /*
+       * PERSON_UPDATED is intentionally event-only in Phase 5.1.
+       *
+       * It does NOT call processAriaEvent().
+       *
+       * Timestamp-based event key is acceptable because this event
+       * currently has no observation projection.
+       */
+      try {
+        await emitAriaEvent({
+          organizationId: orgId,
+          personId: id,
+          type: 'PERSON_UPDATED',
+          source: 'manual',
+          actorId: req.user.id,
+
+          metadata: {
+            updated_fields:
+              Object.keys(req.body).filter(
+                (key) => key !== 'id'
+              ),
+          },
+
+          eventKey:
+            `manual:${orgId}:person:${id}:update:${Date.now()}`,
+        });
+      } catch (err) {
+        console.error(
+          'ARIA event emission failed for person update:',
+          err
+        );
+      }
+
+      return res.status(200).json(
+        result.rows[0]
+      );
     } catch (err) {
-      console.error('PUT person error:', err);
-      return res.status(500).json({ error: err.message });
+      console.error(
+        'PUT person error:',
+        err
+      );
+
+      return res.status(500).json({
+        error: err.message,
+      });
     }
   }
 
-  res.status(405).end();
+  // =========================================================
+  // Unsupported method
+  // =========================================================
+
+  return res
+    .status(405)
+    .json({
+      error: 'Method not allowed',
+    });
 }
 
 export default withOrg(handler);
