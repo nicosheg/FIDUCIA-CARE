@@ -7,41 +7,22 @@ async function handler(req, res) {
   console.log('[SCAN] Start request received');
 
   if (req.method !== 'POST') {
-    console.log('[SCAN] Method not allowed:', req.method);
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const {
-    image_base64,
-    program_name,
-  } = req.body || {};
+  const { image_base64, program_name } = req.body || {};
 
-  if (
-    !image_base64 ||
-    typeof image_base64 !== 'string' ||
-    image_base64.length < 100
-  ) {
-    console.error('[SCAN] Image data missing or too short');
-
-    return res.status(400).json({
-      error: 'Image data is empty or invalid',
-    });
+  if (!image_base64 || typeof image_base64 !== 'string' || image_base64.length < 100) {
+    return res.status(400).json({ error: 'Image data is empty or invalid' });
   }
 
   const orgId = req.org.id;
   const actorId = req.user.id;
   const programName = program_name || 'GIBEON';
 
-  console.log('[SCAN] Organization ID:', orgId);
-  console.log('[SCAN] Actor ID:', actorId);
-  console.log('[SCAN] Program:', programName);
-
   try {
     const jobRes = await pool.query(
-      `INSERT INTO scan_jobs (
-         organization_id,
-         status
-       )
+      `INSERT INTO scan_jobs (organization_id, status)
        VALUES ($1, 'pending')
        RETURNING id`,
       [orgId]
@@ -51,44 +32,25 @@ async function handler(req, res) {
 
     console.log('[SCAN] Job created:', jobId);
 
-    // Respond immediately. Vision processing continues in the background.
-    res.status(200).json({
-      job_id: jobId,
-    });
+    // Respond immediately; vision processing continues in the background.
+    res.status(200).json({ job_id: jobId, status: 'queued' });
 
-    /*
-     * actorId is part of the options object so the processor can
-     * attribute ARIA events to the authenticated user who started
-     * the scan.
-     */
+    // IMPORTANT: processVisionJob expects an options object.
     processVisionJob(
       jobId,
       image_base64,
       orgId,
       programName,
-      {
-        actorId,
-        registerMode: 'complete',
-      }
+      { actorId, registerMode: 'complete' }
     ).catch((err) => {
-      console.error(
-        '[SCAN] Background job failed:',
-        err.message,
-        err.stack
-      );
+      console.error(`[SCAN] Background job ${jobId} failed:`, err);
     });
-  } catch (error) {
-    console.error(
-      '[SCAN] Start error:',
-      error.message,
-      error.stack
-    );
+  } catch (err) {
+    console.error('[SCAN] Start error:', err);
 
     if (!res.headersSent) {
       return res.status(500).json({
-        error:
-          error.message ||
-          'Internal server error',
+        error: 'ARIA could not start the scan. Please try again.',
       });
     }
   }
