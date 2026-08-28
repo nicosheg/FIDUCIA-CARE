@@ -1,5 +1,6 @@
 // pages/api/attendance/mark.js
-// Marks confirmed-present attendance. Does not create participation directly.
+// Canonical attendance marking endpoint.
+// Marking attendance never creates participation or ARIA observations directly.
 
 import pool from '../../../lib/db';
 import { withOrg } from '../../../lib/apiHelpers';
@@ -17,10 +18,9 @@ export default withOrg(async function handler(req, res) {
   const client = await pool.connect();
 
   try {
-    // Session must belong to this organization and still be active.
     const session = await client.query(
       `SELECT id FROM sessions
-       WHERE id=$1 AND organization_id=$2 AND status='active'
+       WHERE id = $1 AND organization_id = $2 AND status = 'active'
        LIMIT 1`,
       [session_id, orgId]
     );
@@ -28,10 +28,9 @@ export default withOrg(async function handler(req, res) {
       return res.status(403).json({ error: 'Active session not found in your organization.' });
     }
 
-    // Only assigned users may mark attendance.
     const assignment = await client.query(
       `SELECT 1 FROM session_users
-       WHERE session_id=$1 AND user_id=$2
+       WHERE session_id = $1 AND user_id = $2
        LIMIT 1`,
       [session_id, userId]
     );
@@ -39,31 +38,29 @@ export default withOrg(async function handler(req, res) {
       return res.status(403).json({ error: 'You are not assigned to this session.' });
     }
 
-    // Person must belong to the same organization.
     const person = await client.query(
       `SELECT id FROM people
-       WHERE id=$1 AND organization_id=$2
+       WHERE id = $1 AND organization_id = $2
        LIMIT 1`,
       [people_id, orgId]
     );
     if (!person.rows.length) {
-      return res.status(404).json({ error: 'Person not found in your organization.' });
+      return res.status(403).json({ error: 'Person not found in your organization.' });
     }
 
-    // Product rule: marking means PRESENT. No absent state is accepted here.
     const today = new Date().toISOString().slice(0, 10);
 
     await client.query('BEGIN');
     await client.query(
       `INSERT INTO attendance_records
        (people_id, attendance_date, present, session_id, marked_by, marked_at, confirmed)
-       VALUES ($1,$2,true,$3,$4,NOW(),false)
-       ON CONFLICT (people_id,attendance_date) DO UPDATE SET
-         present=true,
-         session_id=EXCLUDED.session_id,
-         marked_by=EXCLUDED.marked_by,
-         marked_at=NOW(),
-         confirmed=false`,
+       VALUES ($1, $2, true, $3, $4, NOW(), false)
+       ON CONFLICT (people_id, attendance_date) DO UPDATE SET
+         present = true,
+         session_id = EXCLUDED.session_id,
+         marked_by = EXCLUDED.marked_by,
+         marked_at = NOW(),
+         confirmed = false`,
       [people_id, today, session_id, userId]
     );
     await client.query('COMMIT');
@@ -71,7 +68,7 @@ export default withOrg(async function handler(req, res) {
     return res.status(200).json({ success: true });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
-    console.error('[ATTENDANCE] Mark error:', err);
+    console.error('Mark attendance error:', err);
     return res.status(500).json({ error: 'Could not mark attendance.' });
   } finally {
     client.release();
