@@ -1,51 +1,77 @@
 // pages/api/attendance/create-session.js
+// Creates an organization-scoped active attendance session.
+
 import pool from '../../../lib/db';
 import { withOrg } from '../../../lib/apiHelpers';
 
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { name, service_type, group_ids } = req.body;
-  if (!name) return res.status(400).json({ error: 'Session name required' });
+  const { name, group_ids } = req.body || {};
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ error: 'Session name required' });
+  }
+
+  if (group_ids !== undefined && !Array.isArray(group_ids)) {
+    return res.status(400).json({ error: 'group_ids must be an array' });
+  }
 
   const orgId = req.org.id;
-
   const client = await pool.connect();
+
   try {
     await client.query('BEGIN');
 
-    // Create session
     const sessionRes = await client.query(
-      `INSERT INTO sessions (organization_id, name, status) VALUES ($1, $2, 'active') RETURNING id`,
-      [orgId, name]
+      `INSERT INTO sessions (organization_id,name,status)
+       VALUES ($1,$2,'active')
+       RETURNING id`,
+      [orgId, name.trim()]
     );
-    const sessionId = sessionRes.rows[0].id;
 
-    // Link selected groups (if none provided, use all groups)
+    const sessionId = sessionRes.rows[0].id;
     let groups;
-    if (group_ids && group_ids.length > 0) {
-      groups = group_ids;
+
+    if (Array.isArray(group_ids) && group_ids.length) {
+      const uniqueIds = [...new Set(group_ids.filter(Boolean))];
+
+      // Never allow a caller to attach another organization's group.
+      const validGroups = await client.query(
+        `SELECT id FROM attendance_groups
+         WHERE organization_id=$1 AND id=ANY($2::uuid[])`,
+        [orgId, uniqueIds]
+      );
+
+      if (validGroups.rows.length !== uniqueIds.length) {
+        throw new Error('One or more attendance groups are invalid.');
+      }
+
+      groups = validGroups.rows.map(r => r.id);
     } else {
       const allGroups = await client.query(
-        `SELECT id FROM attendance_groups WHERE organization_id = $1 ORDER BY sort_order`,
+        `SELECT id FROM attendance_groups
+         WHERE organization_id=$1
+         ORDER BY sort_order`,
         [orgId]
       );
       groups = allGroups.rows.map(r => r.id);
     }
 
-    for (const gid of groups) {
+    for (const groupId of groups) {
       await client.query(
-        `INSERT INTO session_groups (session_id, group_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [sessionId, gid]
+        `INSERT INTO session_groups (session_id,group_id)
+         VALUES ($1,$2)
+         ON CONFLICT DO NOTHING`,
+        [sessionId, groupId]
       );
     }
 
     await client.query('COMMIT');
-    res.status(200).json({ id: sessionId, groups });
+    return res.status(200).json({ id: sessionId, groups });
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('Create session error:', err);
-    res.status(500).json({ error: err.message });
+    try { await client.query('ROLLBACK'); } catch {}
+    console.error('[ATTENDANCE] Create session error:', err);
+    return res.status(500).json({ error: 'Could not create attendance session.' });
   } finally {
     client.release();
   }
