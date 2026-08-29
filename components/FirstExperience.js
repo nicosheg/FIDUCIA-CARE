@@ -1,6 +1,7 @@
 // components/FirstExperience.js
-// Nyeo Care — reusable first-experience card.
-// This is contextual guidance, not a forced tutorial tour.
+// Reusable contextual first-experience card.
+// This is not a tutorial tour; each experience appears only when that
+// specific part of nyeo Care is first reached.
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
@@ -15,11 +16,11 @@ const EXPERIENCE_COPY = {
   scan: {
     eyebrow: 'Your first step',
     title: 'Give ARIA your register.',
-    body: 'Take a clear photo of your register. ARIA will turn it into a living memory of your organization.',
+    body: 'Take a clear photo of your register. ARIA will turn it into a living memory of the people you know.',
     action: 'Scan the register',
   },
   people: {
-    eyebrow: 'Your organization',
+    eyebrow: 'Your people',
     title: 'This is where your people live.',
     body: 'Every person ARIA remembers belongs here. You can explore people, attendance and things that need review.',
     action: 'Got it',
@@ -38,13 +39,19 @@ const EXPERIENCE_COPY = {
   },
 };
 
-export default function FirstExperience({ experience, onComplete, onAction }) {
+export default function FirstExperience({
+  experience,
+  onComplete,
+  onAction,
+}) {
   const [visible, setVisible] = useState(false);
   const [saving, setSaving] = useState(false);
+
   const copy = EXPERIENCE_COPY[experience];
 
   useEffect(() => {
     if (!copy) return;
+
     const timer = setTimeout(() => setVisible(true), 180);
     return () => clearTimeout(timer);
   }, [copy]);
@@ -53,6 +60,7 @@ export default function FirstExperience({ experience, onComplete, onAction }) {
 
   const complete = async () => {
     if (saving) return;
+
     setSaving(true);
 
     try {
@@ -191,4 +199,4 @@ export default function FirstExperience({ experience, onComplete, onAction }) {
       `}</style>
     </div>
   );
-}
+    }
