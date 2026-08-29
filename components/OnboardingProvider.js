@@ -1,106 +1,87 @@
 // components/OnboardingProvider.js
-// Loads onboarding once and makes its state available throughout nyeo Care.
+// ARIA Care onboarding state only.
+// IMPORTANT: This provider does NOT perform auth redirects or subscribe to auth events.
+// Authentication/route protection belongs to the individual application pages.
 
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-} from 'react';
-import { useRouter } from 'next/router';
-import { supabase } from '../lib/supabaseClient';
+import{createContext,useContext,useEffect,useState,useCallback}from'react';
+import{supabase}from'../lib/supabaseClient';
 
-const OnboardingContext = createContext(null);
+const OnboardingContext=createContext(null);
 
-export function OnboardingProvider({ children }) {
-  const router = useRouter();
+const INITIAL_STATE={
+  loaded:false,
+  enabled:false,
+  experienced:{},
+  ariaInstructions:''
+};
 
-  const [state, setState] = useState({
-    loaded: false,
-    enabled: false,
-    experienced: {},
-    ariaInstructions: '',
-  });
+export function OnboardingProvider({children}){
+  const[state,setState]=useState(INITIAL_STATE);
 
-  const load = async () => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+  // Load onboarding only when a valid authenticated session exists.
+  const load=useCallback(async()=>{
+    try{
+      const{data:{session}}=await supabase.auth.getSession();
 
-    if (!session) {
-      setState(prev => ({ ...prev, loaded: true }));
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/onboarding', {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error('Unable to load onboarding');
-      }
-
-      const data = await response.json();
-
-      setState({
-        loaded: true,
-        enabled: data.onboarding?.enabled === true,
-        experienced: data.onboarding?.experienced || {},
-        ariaInstructions: data.ariaInstructions || '',
-      });
-    } catch (error) {
-      console.error('[ONBOARDING] Load error:', error);
-      setState(prev => ({ ...prev, loaded: true }));
-    }
-  };
-
-  useEffect(() => {
-    load();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) {
-        router.push('/login');
+      if(!session){
+        setState(prev=>({...prev,loaded:true,enabled:false}));
         return;
       }
 
-      load();
-    });
+      const response=await fetch('/api/onboarding',{
+        headers:{Authorization:`Bearer ${session.access_token}`}
+      });
 
-    return () => subscription.unsubscribe();
-  }, [router]);
+      if(!response.ok)throw new Error(`Onboarding request failed: ${response.status}`);
 
-  const completeExperience = experience => {
-    setState(prev => ({
+      const data=await response.json();
+
+      setState({
+        loaded:true,
+        enabled:data.onboarding?.enabled===true,
+        experienced:data.onboarding?.experienced||{},
+        ariaInstructions:data.ariaInstructions||''
+      });
+    }catch(error){
+      console.error('[ONBOARDING] Load error:',error);
+      setState(prev=>({...prev,loaded:true}));
+    }
+  },[]);
+
+  // One initial load. No auth listener here to avoid auth-event/getSession loops.
+  useEffect(()=>{
+    let active=true;
+    const initialize=async()=>{
+      if(active)await load();
+    };
+    initialize();
+    return()=>{active=false;};
+  },[load]);
+
+  const completeExperience=useCallback(experience=>{
+    setState(prev=>({
       ...prev,
-      experienced: {
-        ...prev.experienced,
-        [experience]: true,
-      },
+      experienced:{...prev.experienced,[experience]:true}
     }));
-  };
+  },[]);
 
-  const isExperienced = experience =>
-    state.experienced?.[experience] === true;
+  const isExperienced=useCallback(
+    experience=>state.experienced?.[experience]===true,
+    [state.experienced]
+  );
 
-  return (
-    <OnboardingContext.Provider
-      value={{
-        ...state,
-        isExperienced,
-        completeExperience,
-        reload: load,
-      }}
-    >
+  return(
+    <OnboardingContext.Provider value={{
+      ...state,
+      isExperienced,
+      completeExperience,
+      reload:load
+    }}>
       {children}
     </OnboardingContext.Provider>
   );
 }
 
-export function useOnboarding() {
+export function useOnboarding(){
   return useContext(OnboardingContext);
-      }
+}
