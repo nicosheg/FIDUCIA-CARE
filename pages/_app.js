@@ -1,52 +1,25 @@
--- nyeo Care onboarding initialization
--- IMPORTANT: Existing organizations are NOT modified.
--- Only future organizations receive onboarding.enabled=true.
-
-ALTER TABLE public.organizations
-ALTER COLUMN settings
-SET DEFAULT '{
-  "onboarding": {
-    "enabled": true,
-    "experienced": {
-      "home": false,
-      "scan": false,
-      "people": false,
-      "review": false,
-      "profile": false
-    }
-  }
-}'::jsonb;
-
--- Also initialize onboarding when a future organization explicitly
--- supplies NULL or an empty settings object.
-CREATE OR REPLACE FUNCTION public.initialize_organization_settings()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF NEW.settings IS NULL OR NEW.settings = '{}'::jsonb THEN
-    NEW.settings := '{
-      "onboarding": {
-        "enabled": true,
-        "experienced": {
-          "home": false,
-          "scan": false,
-          "people": false,
-          "review": false,
-          "profile": false
+// pages/_app.js
+export default function App({ Component, pageProps }) {
+  return (
+    <>
+      <style jsx global>{`
+        @keyframes gradientShift {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
         }
-      }
-    }'::jsonb;
-  END IF;
 
-  RETURN NEW;
-END;
-$$;
+        body {
+          margin: 0;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          color: #1a1a2e;
+        }
 
-DROP TRIGGER IF EXISTS initialize_organization_settings
-ON public.organizations;
-
-CREATE TRIGGER initialize_organization_settings
-BEFORE INSERT ON public.organizations
-FOR EACH ROW
-EXECUTE FUNCTION public.initialize_organization_settings();
+        * {
+          box-sizing: border-box;
+        }
+      `}</style>
+      <Component {...pageProps} />
+    </>
+  );
+}
