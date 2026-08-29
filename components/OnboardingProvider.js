@@ -1,6 +1,5 @@
 // components/OnboardingProvider.js
-// Nyeo Care — global onboarding state.
-// It loads organization onboarding once and keeps individual experiences independent.
+// Loads onboarding once and makes its state available throughout nyeo Care.
 
 import {
   createContext,
@@ -68,6 +67,7 @@ export function OnboardingProvider({ children }) {
         router.push('/login');
         return;
       }
+
       load();
     });
 
@@ -103,4 +103,4 @@ export function OnboardingProvider({ children }) {
 
 export function useOnboarding() {
   return useContext(OnboardingContext);
-}
+      }
