@@ -1,127 +1,97 @@
-// pages/api/attendance/mark.js
-// Canonical attendance marking endpoint.
-// The Home Attendance modal marks people directly.
-// No group claim or session_users assignment is required.
+// pages/api/attendance/create-session.js
+// Creates an organization-scoped attendance session and assigns its creator.
 
 import pool from '../../../lib/db';
 import { withOrg } from '../../../lib/apiHelpers';
 
-export default withOrg(async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({
-      error: 'Method not allowed',
-    });
-  }
+async function handler(req,res){
+  if(req.method!=='POST')return res.status(405).end();
 
-  const {
-    session_id,
-    people_id,
-  } = req.body || {};
+  const{name,group_ids}=req.body||{};
+  if(typeof name!=='string'||!name.trim())
+    return res.status(400).json({error:'Session name required'});
 
-  if (!session_id || !people_id) {
-    return res.status(400).json({
-      error: 'Missing session_id or people_id',
-    });
-  }
+  if(group_ids!==undefined&&!Array.isArray(group_ids))
+    return res.status(400).json({error:'group_ids must be an array'});
 
-  const orgId = req.org.id;
-  const userId = req.user.id;
-  const client = await pool.connect();
+  const orgId=req.org.id;
+  const userId=req.user.id;
+  const client=await pool.connect();
 
-  try {
-    // Verify that this is an active session owned by this organization.
-    const session = await client.query(
-      `SELECT id
-       FROM sessions
-       WHERE id = $1
-         AND organization_id = $2
-         AND status = 'active'
-       LIMIT 1`,
-      [session_id, orgId]
-    );
-
-    if (!session.rows.length) {
-      return res.status(403).json({
-        error: 'Active session not found in your organization.',
-      });
-    }
-
-    // Verify that the person belongs to this organization.
-    const person = await client.query(
-      `SELECT id
-       FROM people
-       WHERE id = $1
-         AND organization_id = $2
-         AND status != 'deleted'
-       LIMIT 1`,
-      [people_id, orgId]
-    );
-
-    if (!person.rows.length) {
-      return res.status(403).json({
-        error: 'Person not found in your organization.',
-      });
-    }
-
-    // Use the existing attendance date convention.
-    const today = new Date()
-      .toISOString()
-      .slice(0, 10);
-
+  try{
     await client.query('BEGIN');
 
-    /*
-     * One attendance record per person per day is preserved.
-     * Marking the same person twice is therefore harmless.
-     */
-    await client.query(
-      `INSERT INTO attendance_records
-       (
-         people_id,
-         attendance_date,
-         present,
-         session_id,
-         marked_by,
-         marked_at,
-         confirmed
-       )
-       VALUES ($1, $2, true, $3, $4, NOW(), false)
-       ON CONFLICT (people_id, attendance_date)
-       DO UPDATE SET
-         present = true,
-         session_id = EXCLUDED.session_id,
-         marked_by = EXCLUDED.marked_by,
-         marked_at = NOW(),
-         confirmed = false`,
-      [
-        people_id,
-        today,
-        session_id,
-        userId,
-      ]
+    // 1. Create the active session.
+    const sessionRes=await client.query(
+      `INSERT INTO sessions(organization_id,name,status)
+       VALUES($1,$2,'active')
+       RETURNING id`,
+      [orgId,name.trim()]
     );
+
+    const sessionId=sessionRes.rows[0].id;
+
+    // 2. The user who starts the session is automatically assigned.
+    // This allows the creator to mark attendance immediately.
+    await client.query(
+      `INSERT INTO session_users(session_id,user_id)
+       VALUES($1,$2)
+       ON CONFLICT DO NOTHING`,
+      [sessionId,userId]
+    );
+
+    let groups;
+
+    // 3. Attach requested groups, validating organization ownership.
+    if(Array.isArray(group_ids)&&group_ids.length){
+      const uniqueIds=[...new Set(group_ids.filter(Boolean))];
+
+      const validGroups=await client.query(
+        `SELECT id FROM attendance_groups
+         WHERE organization_id=$1 AND id=ANY($2::uuid[])`,
+        [orgId,uniqueIds]
+      );
+
+      if(validGroups.rows.length!==uniqueIds.length)
+        throw new Error('One or more attendance groups are invalid.');
+
+      groups=validGroups.rows.map(r=>r.id);
+    }else{
+      const allGroups=await client.query(
+        `SELECT id FROM attendance_groups
+         WHERE organization_id=$1
+         ORDER BY sort_order`,
+        [orgId]
+      );
+
+      groups=allGroups.rows.map(r=>r.id);
+    }
+
+    // 4. Connect the groups to the session.
+    for(const groupId of groups){
+      await client.query(
+        `INSERT INTO session_groups(session_id,group_id)
+         VALUES($1,$2)
+         ON CONFLICT DO NOTHING`,
+        [sessionId,groupId]
+      );
+    }
 
     await client.query('COMMIT');
 
     return res.status(200).json({
-      success: true,
-      people_id,
-      session_id,
+      id:sessionId,
+      groups
     });
-  } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {}
-
-    console.error(
-      '[ATTENDANCE] Mark attendance error:',
-      err
-    );
-
+  }catch(err){
+    try{await client.query('ROLLBACK')}catch{}
+    console.error('[ATTENDANCE] Create session error:',err);
     return res.status(500).json({
-      error: 'Could not mark attendance.',
+      error:'Could not create attendance session.'
     });
-  } finally {
+  }finally{
     client.release();
   }
-});
+}
+
+export default withOrg(handler);
