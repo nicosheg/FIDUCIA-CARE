@@ -1,77 +1,104 @@
 // pages/api/attendance/create-session.js
-// Creates an organization-scoped active attendance session.
+// Canonical organization-scoped attendance session creation.
 
 import pool from '../../../lib/db';
 import { withOrg } from '../../../lib/apiHelpers';
 
 async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end();
-
-  const { name, group_ids } = req.body || {};
-  if (typeof name !== 'string' || !name.trim()) {
-    return res.status(400).json({ error: 'Session name required' });
+  if (req.method !== 'POST') {
+    return res.status(405).end();
   }
 
-  if (group_ids !== undefined && !Array.isArray(group_ids)) {
-    return res.status(400).json({ error: 'group_ids must be an array' });
+  const { name, sections } = req.body || {};
+
+  if (typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({
+      error: 'Session name required',
+    });
+  }
+
+  if (sections !== undefined && !Array.isArray(sections)) {
+    return res.status(400).json({
+      error: 'sections must be an array',
+    });
+  }
+
+  const cleanSections = Array.isArray(sections)
+    ? [...new Set(
+        sections
+          .filter(s => typeof s === 'string')
+          .map(s => s.trim())
+          .filter(Boolean)
+      )]
+    : [];
+
+  if (!cleanSections.length) {
+    cleanSections.push('All');
   }
 
   const orgId = req.org.id;
+  const userId = req.user.id;
+
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
+    // Create the attendance session.
     const sessionRes = await client.query(
-      `INSERT INTO sessions (organization_id,name,status)
-       VALUES ($1,$2,'active')
-       RETURNING id`,
-      [orgId, name.trim()]
+      `INSERT INTO sessions (
+         organization_id,
+         name,
+         status,
+         started_by,
+         started_at,
+         created_at
+       )
+       VALUES ($1, $2, 'active', $3, NOW(), NOW())
+       RETURNING id, name, status, started_at, created_at`,
+      [orgId, name.trim(), userId]
     );
 
-    const sessionId = sessionRes.rows[0].id;
-    let groups;
+    const session = sessionRes.rows[0];
 
-    if (Array.isArray(group_ids) && group_ids.length) {
-      const uniqueIds = [...new Set(group_ids.filter(Boolean))];
+    // Create the sections belonging to this session.
+    const createdSections = [];
 
-      // Never allow a caller to attach another organization's group.
-      const validGroups = await client.query(
-        `SELECT id FROM attendance_groups
-         WHERE organization_id=$1 AND id=ANY($2::uuid[])`,
-        [orgId, uniqueIds]
+    for (const sectionName of cleanSections) {
+      const sectionRes = await client.query(
+        `INSERT INTO session_sections (
+           session_id,
+           name,
+           created_at,
+           organization_id
+         )
+         VALUES ($1, $2, NOW(), $3)
+         RETURNING id, name`,
+        [session.id, sectionName, orgId]
       );
 
-      if (validGroups.rows.length !== uniqueIds.length) {
-        throw new Error('One or more attendance groups are invalid.');
-      }
-
-      groups = validGroups.rows.map(r => r.id);
-    } else {
-      const allGroups = await client.query(
-        `SELECT id FROM attendance_groups
-         WHERE organization_id=$1
-         ORDER BY sort_order`,
-        [orgId]
-      );
-      groups = allGroups.rows.map(r => r.id);
-    }
-
-    for (const groupId of groups) {
-      await client.query(
-        `INSERT INTO session_groups (session_id,group_id)
-         VALUES ($1,$2)
-         ON CONFLICT DO NOTHING`,
-        [sessionId, groupId]
-      );
+      createdSections.push(sectionRes.rows[0]);
     }
 
     await client.query('COMMIT');
-    return res.status(200).json({ id: sessionId, groups });
+
+    return res.status(200).json({
+      id: session.id,
+      name: session.name,
+      status: session.status,
+      started_at: session.started_at,
+      sections: createdSections,
+    });
   } catch (err) {
-    try { await client.query('ROLLBACK'); } catch {}
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
+
     console.error('[ATTENDANCE] Create session error:', err);
-    return res.status(500).json({ error: 'Could not create attendance session.' });
+
+    return res.status(500).json({
+      error: 'Could not create attendance session.',
+    });
   } finally {
     client.release();
   }
