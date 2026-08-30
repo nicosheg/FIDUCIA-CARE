@@ -1,720 +1,85 @@
 // components/AttendanceModal.js
-// Attendance modal — Home quick action.
-// Users only mark people they actually see.
-// IMPORTANT: No "Absent" action. Unmarked people remain unobserved.
-// People are loaded from the authenticated organization via /api/people.
+import{useState,useEffect,useCallback}from'react';
+import{createPortal}from'react-dom';
+import{supabase}from'../lib/supabaseClient';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+export default function AttendanceModal({isOpen,onClose}){
+ const[session,setSession]=useState(null),[people,setPeople]=useState([]),[search,setSearch]=useState(''),[marked,setMarked]=useState(new Set()),[loading,setLoading]=useState(true),[saving,setSaving]=useState(null),[error,setError]=useState('');
 
-export default function AttendanceModal({ isOpen, onClose }) {
-  const [people, setPeople] = useState([]);
-  const [markedIds, setMarkedIds] = useState(() => new Set());
-  const [search, setSearch] = useState('');
-  const [session, setSession] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [savingId, setSavingId] = useState(null);
-  const [error, setError] = useState('');
-  const [submitted, setSubmitted] = useState(false);
+ const load=useCallback(async()=>{
+  setLoading(true);setError('');
+  try{
+   const{data:{session:auth}}=await supabase.auth.getSession();
+   if(!auth)throw new Error('Please log in again.');
+   const h={Authorization:`Bearer ${auth.access_token}`};
+   const r=await fetch('/api/attendance/active-session',{headers:h}),d=await r.json();
+   if(!r.ok||!d.active)throw new Error('Could not load active session.');
+   setSession(d);
+   const p=await fetch('/api/attendance/search',{headers:h}),pd=await p.json();
+   if(!p.ok)throw new Error(pd.error||'Could not load people.');
+   setPeople(Array.isArray(pd)?pd:[]);
+  }catch(e){console.error('[AttendanceModal]',e);setError(e.message)}
+  finally{setLoading(false)}
+ },[]);
 
-  // Load the current active session and organization-scoped people.
-  const loadAttendance = useCallback(async () => {
-    if (!isOpen) return;
+ useEffect(()=>{if(isOpen)load()},[isOpen,load]);
 
-    setLoading(true);
-    setError('');
-    setSubmitted(false);
+ const toggle=async id=>{
+  if(!session||saving)return;
+  const next=!marked.has(id);setSaving(id);setError('');
+  try{
+   const{data:{session:auth}}=await supabase.auth.getSession();
+   if(!auth)throw new Error('Please log in again.');
+   const r=await fetch('/api/attendance/mark',{
+    method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${auth.access_token}`},
+    body:JSON.stringify({session_id:session.session_id,people_id:id,present:next})
+   });
+   const d=await r.json();
+   if(!r.ok)throw new Error(d.error||'Could not mark attendance.');
+   setMarked(s=>{const n=new Set(s);next?n.add(id):n.delete(id);return n});
+  }catch(e){setError(e.message)}
+  finally{setSaving(null)}
+ };
 
-    try {
-      const { data: { session: authSession } } =
-        await supabase.auth.getSession();
+ if(!isOpen)return null;
+ const visible=people.filter(p=>`${p.first_name||''} ${p.last_name||''}`.toLowerCase().includes(search.toLowerCase()));
+ const content=(
+  <div style={S.overlay}>
+   <div style={S.modal}>
+    <div style={S.head}>
+     <div><h2 style={S.title}>Attendance</h2><div style={S.sub}>{session?.name||'Loading...'}</div></div>
+     <button onClick={onClose} style={S.close}>×</button>
+    </div>
 
-      if (!authSession) {
-        setError('Your session has expired. Please log in again.');
-        return;
-      }
+    {error&&<div style={S.error}>{error}<button onClick={load} style={S.retry}>Try again</button></div>}
 
-      const headers = {
-        Authorization: `Bearer ${authSession.access_token}`,
-      };
-
-      // Active session comes from the authenticated organization.
-      const sessionRes = await fetch('/api/attendance/active-session', {
-        headers,
-      });
-
-      const sessionData = await sessionRes.json();
-
-      if (!sessionRes.ok || !sessionData.active) {
-        setSession(null);
-        setError(
-          sessionData.error ||
-          'No active attendance session. Start one before marking attendance.'
-        );
-        return;
-      }
-
-      setSession(sessionData);
-
-      // IMPORTANT: /api/people derives organization from auth.
-      // Do not send organization_id from the browser.
-      const peopleRes = await fetch('/api/people', { headers });
-      const peopleData = await peopleRes.json();
-
-      if (!peopleRes.ok || !Array.isArray(peopleData)) {
-        throw new Error(
-          peopleData.error || 'Could not load people.'
-        );
-      }
-
-      setPeople(
-        peopleData.filter(p => p.status === undefined || p.status === 'active')
-      );
-    } catch (err) {
-      console.error('[AttendanceModal] Load error:', err);
-      setError(err.message || 'Could not load attendance.');
-    } finally {
-      setLoading(false);
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      loadAttendance();
-    } else {
-      document.body.style.overflow = '';
-      setSearch('');
-      setError('');
-      setSubmitted(false);
-      setMarkedIds(new Set());
-    }
-
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [isOpen, loadAttendance]);
-
-  // Search by full name or phone without changing the stored people list.
-  const filteredPeople = useMemo(() => {
-    const q = search.trim().toLowerCase();
-
-    if (!q) return people;
-
-    return people.filter(person => {
-      const name =
-        `${person.first_name || ''} ${person.last_name || ''}`.toLowerCase();
-      const phone = (person.phone || '').toLowerCase();
-      return name.includes(q) || phone.includes(q);
-    });
-  }, [people, search]);
-
-  const togglePerson = async person => {
-    if (!session || savingId) return;
-
-    const wasMarked = markedIds.has(person.id);
-    const next = new Set(markedIds);
-
-    if (wasMarked) {
-      // The canonical attendance endpoint currently records presence.
-      // We therefore remove the local selection only until the next
-      // server refresh rather than inventing an "absent" state.
-      next.delete(person.id);
-      setMarkedIds(next);
-      return;
-    }
-
-    setSavingId(person.id);
-    setError('');
-
-    try {
-      const { data: { session: authSession } } =
-        await supabase.auth.getSession();
-
-      if (!authSession) {
-        throw new Error('Your session has expired. Please log in again.');
-      }
-
-      const res = await fetch('/api/attendance/mark', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authSession.access_token}`,
-        },
-        body: JSON.stringify({
-          session_id: session.session_id,
-          people_id: person.id,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        throw new Error(
-          data.error || 'Could not mark attendance.'
-        );
-      }
-
-      setMarkedIds(prev => {
-        const nextSet = new Set(prev);
-        nextSet.add(person.id);
-        return nextSet;
-      });
-    } catch (err) {
-      console.error('[AttendanceModal] Mark error:', err);
-      setError(err.message || 'Could not mark attendance.');
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  const closeAfterAttendance = () => {
-    onClose?.();
-  };
-
-  if (!isOpen) return null;
-
-  const markedCount = markedIds.size;
-
-  return (
-    <div className="attendance-overlay">
-      <div className="attendance-modal">
-        {/* Header */}
-        <header className="attendance-header">
-          <div>
-            <div className="eyebrow">Attendance</div>
-            <h1>{session?.name || 'Record attendance'}</h1>
-            <p>Tap the people you see.</p>
-          </div>
-
-          <button
-            type="button"
-            className="close-button"
-            onClick={closeAfterAttendance}
-            aria-label="Close attendance"
-          >
-            ×
-          </button>
-        </header>
-
-        {/* Session status */}
-        {session && (
-          <div className="session-bar">
-            <div>
-              <strong>{session.name}</strong>
-              <span>Active session</span>
-            </div>
-            <div className="count">
-              <strong>{markedCount}</strong>
-              <span>present</span>
-            </div>
-          </div>
-        )}
-
-        {/* Error / empty state */}
-        {error && (
-          <div className="attendance-error">
-            <div>{error}</div>
-            {!session && (
-              <button type="button" onClick={loadAttendance}>
-                Try again
-              </button>
-            )}
-          </div>
-        )}
-
-        {loading ? (
-          <div className="loading-state">
-            <div className="loading-line" />
-            <div className="loading-line short" />
-            <div className="loading-grid">
-              {Array.from({ length: 12 }).map((_, i) => (
-                <div className="loading-person" key={i} />
-              ))}
-            </div>
-          </div>
-        ) : session ? (
-          <>
-            {/* Search */}
-            <div className="search-wrap">
-              <span className="search-icon">⌕</span>
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search people..."
-                aria-label="Search people"
-              />
-              {search && (
-                <button
-                  type="button"
-                  className="clear-search"
-                  onClick={() => setSearch('')}
-                  aria-label="Clear search"
-                >
-                  ×
-                </button>
-              )}
-            </div>
-
-            {/* People */}
-            {people.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-title">No people have been added yet.</div>
-                <div className="empty-text">
-                  Add people first, then they will appear here for attendance.
-                </div>
-              </div>
-            ) : filteredPeople.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-title">No match found.</div>
-                <div className="empty-text">
-                  Try another name or phone number.
-                </div>
-              </div>
-            ) : (
-              <div className="people-grid">
-                {filteredPeople.map(person => {
-                  const marked = markedIds.has(person.id);
-                  const saving = savingId === person.id;
-
-                  return (
-                    <button
-                      key={person.id}
-                      type="button"
-                      className={`person-card ${marked ? 'marked' : ''}`}
-                      onClick={() => togglePerson(person)}
-                      disabled={savingId !== null && !saving}
-                    >
-                      <div className="person-main">
-                        <div className="avatar">
-                          {(person.first_name || '?')
-                            .charAt(0)
-                            .toUpperCase()}
-                        </div>
-
-                        <div className="person-details">
-                          <div className="person-name">
-                            {person.first_name} {person.last_name || ''}
-                          </div>
-
-                          {person.phone && (
-                            <div className="person-phone">
-                              {person.phone}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className={`mark-indicator ${marked ? 'active' : ''}`}>
-                        {saving ? '…' : marked ? '✓' : ''}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Bottom action */}
-            <div className="attendance-footer">
-              <div className="footer-summary">
-                <strong>{markedCount}</strong>
-                <span>people marked present</span>
-              </div>
-
-              <button
-                type="button"
-                className="done-button"
-                onClick={() => {
-                  setSubmitted(true);
-                  setTimeout(closeAfterAttendance, 350);
-                }}
-              >
-                {submitted ? '✓ Saved' : 'Done'}
-              </button>
-            </div>
-          </>
-        ) : null}
+    {loading?<div style={S.center}>Loading people...</div>:!session?<div style={S.center}>No active attendance session.</div>:(
+     <>
+      <div style={S.stats}><b>{marked.size}</b><span>present</span><span>•</span><b>{people.length}</b><span>people</span></div>
+      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search people..." style={S.search}/>
+      <div style={S.list}>
+       {visible.length?visible.map(p=>{
+        const is=marked.has(p.id);
+        return <button key={p.id} onClick={()=>toggle(p.id)} disabled={saving===p.id} style={{...S.person,...(is?S.present:{})}}>
+         <span><strong>{p.first_name} {p.last_name||''}</strong>{p.phone&&<small>{p.phone}</small>}</span>
+         <span style={S.check}>{is?'✓':'○'}</span>
+        </button>
+       }):<div style={S.center}>{people.length?'No matching people.':'No people have been added yet.'}</div>}
       </div>
+     </>
+    )}
+   </div>
+  </div>
+ );
 
-      <style jsx>{`
-        .attendance-overlay {
-          position: fixed;
-          inset: 0;
-          z-index: 2000;
-          background: rgba(3, 8, 24, 0.82);
-          backdrop-filter: blur(18px);
-          -webkit-backdrop-filter: blur(18px);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 12px;
-        }
+ return typeof document!=='undefined'?createPortal(content,document.body):null;
+}
 
-        .attendance-modal {
-          width: min(1180px, 100%);
-          height: min(94vh, 900px);
-          background: rgba(10, 17, 40, 0.97);
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 30px;
-          box-shadow: 0 30px 100px rgba(0, 0, 0, 0.45);
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-          color: #f5f5f5;
-        }
-
-        .attendance-header {
-          flex: 0 0 auto;
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 20px;
-          padding: 22px 26px 14px;
-        }
-
-        .eyebrow {
-          color: rgba(255, 255, 255, 0.38);
-          font-size: 11px;
-          letter-spacing: 1.6px;
-          text-transform: uppercase;
-          margin-bottom: 5px;
-        }
-
-        .attendance-header h1 {
-          margin: 0;
-          font-size: clamp(24px, 4vw, 34px);
-          line-height: 1.1;
-          font-weight: 600;
-          letter-spacing: -0.025em;
-        }
-
-        .attendance-header p {
-          margin: 6px 0 0;
-          color: rgba(255, 255, 255, 0.48);
-          font-size: 14px;
-        }
-
-        .close-button {
-          width: 38px;
-          height: 38px;
-          flex: 0 0 38px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 50%;
-          background: rgba(255, 255, 255, 0.05);
-          color: rgba(255, 255, 255, 0.72);
-          font-size: 25px;
-          line-height: 1;
-          cursor: pointer;
-        }
-
-        .session-bar {
-          flex: 0 0 auto;
-          margin: 0 26px 12px;
-          padding: 10px 14px;
-          border-radius: 16px;
-          background: rgba(255, 255, 255, 0.045);
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-        }
-
-        .session-bar strong {
-          display: block;
-          font-size: 14px;
-          font-weight: 550;
-        }
-
-        .session-bar span {
-          display: block;
-          color: rgba(255, 255, 255, 0.38);
-          font-size: 11px;
-          margin-top: 2px;
-        }
-
-        .session-bar .count {
-          text-align: right;
-        }
-
-        .session-bar .count strong {
-          font-size: 20px;
-          color: #d4af37;
-        }
-
-        .search-wrap {
-          position: relative;
-          flex: 0 0 auto;
-          margin: 0 26px 14px;
-        }
-
-        .search-wrap input {
-          width: 100%;
-          box-sizing: border-box;
-          padding: 11px 42px;
-          border-radius: 14px;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          outline: none;
-          background: rgba(255, 255, 255, 0.055);
-          color: #f5f5f5;
-          font-size: 14px;
-        }
-
-        .search-wrap input::placeholder {
-          color: rgba(255, 255, 255, 0.3);
-        }
-
-        .search-icon {
-          position: absolute;
-          left: 15px;
-          top: 50%;
-          transform: translateY(-52%);
-          color: rgba(255, 255, 255, 0.4);
-          font-size: 21px;
-          pointer-events: none;
-        }
-
-        .clear-search {
-          position: absolute;
-          right: 9px;
-          top: 50%;
-          transform: translateY(-50%);
-          width: 28px;
-          height: 28px;
-          border: 0;
-          border-radius: 50%;
-          background: rgba(255, 255, 255, 0.08);
-          color: rgba(255, 255, 255, 0.6);
-          cursor: pointer;
-        }
-
-        .people-grid {
-          flex: 1 1 auto;
-          min-height: 0;
-          overflow-y: auto;
-          padding: 0 26px 18px;
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 8px;
-          align-content: start;
-        }
-
-        .person-card {
-          min-width: 0;
-          min-height: 58px;
-          padding: 9px 10px;
-          border-radius: 15px;
-          border: 1px solid rgba(255, 255, 255, 0.065);
-          background: rgba(255, 255, 255, 0.045);
-          color: #f5f5f5;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 8px;
-          text-align: left;
-          cursor: pointer;
-          transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-        }
-
-        .person-card:hover {
-          transform: translateY(-1px);
-          background: rgba(255, 255, 255, 0.075);
-        }
-
-        .person-card.marked {
-          background: rgba(212, 175, 55, 0.11);
-          border-color: rgba(212, 175, 55, 0.45);
-        }
-
-        .person-main {
-          min-width: 0;
-          display: flex;
-          align-items: center;
-          gap: 9px;
-        }
-
-        .avatar {
-          width: 32px;
-          height: 32px;
-          flex: 0 0 32px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 50%;
-          background: rgba(212, 175, 55, 0.12);
-          color: #d4af37;
-          font-size: 12px;
-          font-weight: 650;
-        }
-
-        .person-details {
-          min-width: 0;
-        }
-
-        .person-name {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          font-size: 13px;
-          font-weight: 500;
-        }
-
-        .person-phone {
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-          color: rgba(255, 255, 255, 0.3);
-          font-size: 10px;
-          margin-top: 2px;
-        }
-
-        .mark-indicator {
-          width: 22px;
-          height: 22px;
-          flex: 0 0 22px;
-          border-radius: 50%;
-          border: 1px solid rgba(255, 255, 255, 0.16);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: #d4af37;
-          font-size: 13px;
-          font-weight: 700;
-        }
-
-        .mark-indicator.active {
-          border-color: #d4af37;
-          background: #d4af37;
-          color: #0a1128;
-        }
-
-        .attendance-footer {
-          flex: 0 0 auto;
-          min-height: 62px;
-          padding: 10px 26px;
-          border-top: 1px solid rgba(255, 255, 255, 0.07);
-          background: rgba(10, 17, 40, 0.98);
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 15px;
-        }
-
-        .footer-summary {
-          display: flex;
-          align-items: baseline;
-          gap: 6px;
-          color: rgba(255, 255, 255, 0.38);
-          font-size: 12px;
-        }
-
-        .footer-summary strong {
-          color: #d4af37;
-          font-size: 20px;
-        }
-
-        .done-button {
-          border: 0;
-          border-radius: 999px;
-          padding: 10px 22px;
-          background: #d4af37;
-          color: #0a1128;
-          font-weight: 650;
-          cursor: pointer;
-        }
-
-        .attendance-error {
-          flex: 0 0 auto;
-          margin: 0 26px 12px;
-          padding: 10px 13px;
-          border-radius: 13px;
-          background: rgba(239, 68, 68, 0.1);
-          border: 1px solid rgba(239, 68, 68, 0.3);
-          color: rgba(255, 255, 255, 0.75);
-          font-size: 13px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-        }
-
-        .attendance-error button {
-          border: 0;
-          border-radius: 999px;
-          padding: 6px 11px;
-          background: rgba(255, 255, 255, 0.08);
-          color: #fff;
-          cursor: pointer;
-        }
-
-        .empty-state {
-          flex: 1 1 auto;
-          min-height: 180px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-direction: column;
-          text-align: center;
-          padding: 30px;
-        }
-
-        .empty-title {
-          color: rgba(255, 255, 255, 0.72);
-          font-size: 15px;
-        }
-
-        .empty-text {
-          margin-top: 6px;
-          max-width: 420px;
-          color: rgba(255, 255, 255, 0.35);
-          font-size: 12px;
-          line-height: 1.5;
-        }
-
-        .loading-state {
-          flex: 1;
-          padding: 10px 26px 20px;
-          overflow: hidden;
-        }
-
-        .loading-line {
-          width: 180px;
-          height: 15px;
-          border-radius: 8px;
-          background: rgba(255, 255, 255, 0.06);
-          margin-bottom: 8px;
-        }
-
-        .loading-line.short {
-          width: 100px;
-        }
-
-        .loading-grid {
-          margin-top: 16px;
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: 8px;
-        }
-
-        .loading-person {
-          height: 58px;
-          border-radius: 15px;
-          background: rgba(255, 255, 255, 0.045);
-        }
-
-        @media (max-width: 850px) {
-          .attendance-modal {
-            height: 96vh;
-            border-radius: 24px;
-          }
-
-          .people-grid,
-          .loading-grid {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-          }
-        }
-
-        @media (max-width: 600px) {
-          .attendance-overlay {
-            padding: 0;
-            align-it
+const S={
+ overlay:{position:'fixed',inset:0,zIndex:2000,background:'rgba(0,0,0,.72)',backdropFilter:'blur(12px)',padding:'2vh 2vw',display:'flex',alignItems:'center',justifyContent:'center'},
+ modal:{width:'96vw',height:'96vh',maxWidth:1100,background:'#0d1324',border:'1px solid rgba(255,255,255,.1)',borderRadius:28,display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 20px 80px rgba(0,0,0,.5)'},
+ head:{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'20px 24px',borderBottom:'1px solid rgba(255,255,255,.07)'},
+ title:{margin:0,color:'#f5f5f5',fontSize:26},sub:{color:'rgba(255,255,255,.45)',marginTop:3,fontSize:14},close:{background:'none',border:0,color:'#aaa',fontSize:32,cursor:'pointer',lineHeight:1},
+ stats:{display:'flex',gap:7,alignItems:'center;padding:'12px 24px;color:'rgba(255,255,255,.45)',fontSize:14},search:{margin:'0 24px 14px',padding:'12px 15px',borderRadius:12,border:'1px solid rgba(255,255,255,.1)',background:'rgba(255,255,255,.05)',color:'#fff',outline:'none'},
+ list:{overflowY:'auto',padding:'0 24px 24px',display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(250px,1fr))',gap:8},person:{minHeight:58,padding:'10px 13px',borderRadius:13,border:'1px solid rgba(255,255,255,.07)',background:'rgba(255,255,255,.035)',color:'#eee',display:'flex',alignItems:'center',justifyContent:'space-between',textAlign:'left',cursor:'pointer'},present:{background:'rgba(76,175,80,.13)',border:'1px solid rgba(76,175,80,.5)'},check:{fontSize:22,color:'#4CAF50',marginLeft:8},center:{padding:40,textAlign:'center',color:'rgba(255,255,255,.45)'},error:{margin:'14px 24px 0',padding:'10px 14px',borderRadius:10,background:'rgba(239,68,68,.1)',color:'#ff7777',display:'flex',justifyContent:'space-between',gap:10},retry:{background:'none',border:0,color:'#fff',textDecoration:'underline',cursor:'pointer'}
+};
