@@ -1,45 +1,77 @@
+// pages/api/attendance/search.js
+// Organization-scoped people search for attendance.
+// Uses the authenticated user's organization instead of legacy demo-org input.
+
 import pool from '../../../lib/db';
+import { withOrg } from '../../../lib/apiHelpers';
 
-export default async function handler(req, res) {
-  const { q, user_id, session_id, group_id, organization_id } = req.query;
-  const orgId = organization_id || 'demo-org';
-
-  let people = [];
-
-  if (user_id) {
-    // Progressive recognition: recently marked by this user
-    const recent = await pool.query(
-      `SELECT DISTINCT p.id, p.first_name, p.phone, p.type
-       FROM people p
-       JOIN user_marks um ON um.people_id = p.id
-       WHERE p.organization_id = $1 AND um.user_id = $2
-       ORDER BY um.created_at DESC LIMIT 20`,
-      [orgId, user_id]
-    );
-    people = recent.rows;
-  } else if (q) {
-    // Fast search – case‑insensitive, any word
-    const words = q.trim().split(/\s+/);
-    if (words.length > 0) {
-      const params = [orgId];
-      let query = `SELECT id, first_name, phone, type FROM people WHERE organization_id = $1 AND (`;
-      words.forEach((word, i) => {
-        if (i > 0) query += ' AND ';
-        query += `(first_name ILIKE $${i + 2} OR phone ILIKE $${i + 2})`;
-        params.push(`%${word}%`);
-      });
-      query += `) ORDER BY first_name LIMIT 30`;
-      const result = await pool.query(query, params);
-      people = result.rows;
-    }
-  } else {
-    // No search, return all active people (limited)
-    const result = await pool.query(
-      `SELECT id, first_name, phone, type FROM people WHERE organization_id = $1 AND status = 'active' ORDER BY first_name LIMIT 100`,
-      [orgId]
-    );
-    people = result.rows;
+async function handler(req, res) {
+  if (req.method !== 'GET') {
+    return res.status(405).end();
   }
 
-  res.status(200).json(people);
-      }
+  const { q } = req.query;
+  const orgId = req.org.id;
+
+  try {
+    let people = [];
+
+    if (typeof q === 'string' && q.trim()) {
+      const words = q.trim().split(/\s+/);
+      const params = [orgId];
+
+      let query = `
+        SELECT id, first_name, last_name, phone, type
+        FROM people
+        WHERE organization_id = $1
+          AND status = 'active'
+          AND (
+      `;
+
+      words.forEach((word, i) => {
+        if (i > 0) query += ' AND ';
+
+        query += `(
+          first_name ILIKE $${i + 2}
+          OR last_name ILIKE $${i + 2}
+          OR phone ILIKE $${i + 2}
+        )`;
+
+        params.push(`%${word}%`);
+      });
+
+      query += `
+          )
+        ORDER BY first_name ASC, last_name ASC
+        LIMIT 100
+      `;
+
+      const result = await pool.query(query, params);
+      people = result.rows;
+    } else {
+      const result = await pool.query(
+        `
+          SELECT id, first_name, last_name, phone, type
+          FROM people
+          WHERE organization_id = $1
+            AND status = 'active'
+          ORDER BY first_name ASC, last_name ASC
+          LIMIT 100
+        `,
+        [orgId]
+      );
+
+      people = result.rows;
+    }
+
+    return res.status(200).json(people);
+  } catch (err) {
+    console.error('Attendance people search error:', err);
+
+    return res.status(500).json({
+      error: 'Could not load people.',
+    });
+  }
+}
+
+export default withOrg(handler);
