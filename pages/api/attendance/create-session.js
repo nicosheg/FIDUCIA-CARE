@@ -1,17 +1,21 @@
 // pages/api/attendance/create-session.js
 // Creates an organization-scoped active attendance session.
-// This flow intentionally does NOT depend on the legacy group tables.
+// The creator is automatically assigned to the session.
 
 import pool from '../../../lib/db';
 import { withOrg } from '../../../lib/apiHelpers';
 
 async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end();
+  if (req.method !== 'POST') {
+    return res.status(405).end();
+  }
 
   const { name } = req.body || {};
 
   if (typeof name !== 'string' || !name.trim()) {
-    return res.status(400).json({ error: 'Session name required' });
+    return res.status(400).json({
+      error: 'Session name required',
+    });
   }
 
   const orgId = req.org.id;
@@ -25,31 +29,41 @@ async function handler(req, res) {
       `INSERT INTO sessions (
          organization_id,
          name,
-         status,
-         started_by,
-         started_at,
-         created_at
+         status
        )
-       VALUES ($1, $2, 'active', $3, NOW(), NOW())
-       RETURNING id, name, status, started_at, created_at`,
-      [orgId, name.trim(), userId]
+       VALUES ($1, $2, 'active')
+       RETURNING id, name`,
+      [orgId, name.trim()]
     );
 
     const session = sessionRes.rows[0];
+
+    // The creator is automatically allowed to mark attendance.
+    await client.query(
+      `INSERT INTO session_users (
+         session_id,
+         user_id
+       )
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [session.id, userId]
+    );
 
     await client.query('COMMIT');
 
     return res.status(200).json({
       id: session.id,
       name: session.name,
-      status: session.status,
-      started_at: session.started_at,
-      created_at: session.created_at,
     });
   } catch (err) {
-    try { await client.query('ROLLBACK'); } catch {}
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
 
-    console.error('[ATTENDANCE] Create session error:', err);
+    console.error(
+      '[ATTENDANCE] Create session error:',
+      err
+    );
 
     return res.status(500).json({
       error: 'Could not create attendance session.',
