@@ -1,631 +1,564 @@
 // components/AttendanceTab.js
+// FIDUCIA CARE — Simple Attendance Workspace
+// Shows the organization's people directly.
+// No groups, no separate attendance page, no group claiming.
+// Used inside the Home-page Attendance modal.
+
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
-export default function AttendanceTab() {
+export default function AttendanceTab({ onClose }) {
   const [session, setSession] = useState(null);
-  const [groups, setGroups] = useState([]);
-  const [selectedGroup, setSelectedGroup] = useState(null);
   const [people, setPeople] = useState([]);
-  const [userName, setUserName] = useState('');
-  const [claimedGroups, setClaimedGroups] = useState({});
+  const [search, setSearch] = useState('');
+  const [markedIds, setMarkedIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
+  const [marking, setMarking] = useState(null);
   const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
 
-  // Get logged-in user name
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        const name = session.user?.user_metadata?.name || session.user?.email?.split('@')[0] || 'User';
-        setUserName(name);
-      }
-    });
-  }, []);
+  const getAuthSession = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session;
+  };
 
-  const fetchActiveSession = useCallback(async () => {
+  // Load the active session and the organization's people.
+  const loadAttendance = useCallback(async () => {
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setLoading(false);
+      setLoading(true);
+      setError('');
+
+      const authSession = await getAuthSession();
+
+      if (!authSession) {
+        setError('You must be logged in.');
         return;
       }
-      const res = await fetch(`/api/attendance/active-session`, {
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
+
+      const headers = {
+        Authorization: `Bearer ${authSession.access_token}`,
+      };
+
+      // Get current active attendance session.
+      const sessionRes = await fetch('/api/attendance/active-session', {
+        headers,
       });
-      const data = await res.json();
-      if (data.active) {
-        setSession(data);
-        await fetchGroups(data.session_id);
-      } else {
-        setSession(null);
-        setGroups([]);
-        setPeople([]);
+
+      const sessionData = await sessionRes.json();
+
+      if (!sessionRes.ok) {
+        throw new Error(sessionData.error || 'Could not load attendance session.');
+      }
+
+      let activeSession = sessionData.active
+        ? sessionData
+        : null;
+
+      // If there is no active session, create one automatically.
+      // This keeps Attendance as a simple Home-page tool.
+      if (!activeSession) {
+        setCreating(true);
+
+        const createRes = await fetch('/api/attendance/create-session', {
+          method: 'POST',
+          headers: {
+            ...headers,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            name: 'Sunday Service',
+          }),
+        });
+
+        const createData = await createRes.json();
+
+        if (!createRes.ok || !createData.id) {
+          throw new Error(
+            createData.error || 'Could not create attendance session.'
+          );
+        }
+
+        activeSession = {
+          active: true,
+          session_id: createData.id,
+          name: createData.name || 'Sunday Service',
+        };
+
+        setCreating(false);
+      }
+
+      setSession(activeSession);
+
+      // IMPORTANT:
+      // People come from the canonical /api/people endpoint.
+      // We deliberately do NOT use groups or people-for-group.
+      const peopleRes = await fetch('/api/people', {
+        headers,
+      });
+
+      const peopleData = await peopleRes.json();
+
+      if (!peopleRes.ok) {
+        throw new Error(
+          peopleData.error || 'Could not load people.'
+        );
+      }
+
+      if (!Array.isArray(peopleData)) {
+        throw new Error('Invalid people response.');
+      }
+
+      setPeople(peopleData);
+
+      // Restore people already marked present in this session.
+      // This lets multiple ushers/users see the same attendance state.
+      const attendanceRes = await fetch(
+        `/api/attendance/session-people?session_id=${encodeURIComponent(activeSession.session_id)}`,
+        { headers }
+      );
+
+      if (attendanceRes.ok) {
+        const attendanceData = await attendanceRes.json();
+
+        if (Array.isArray(attendanceData.present_ids)) {
+          setMarkedIds(new Set(attendanceData.present_ids));
+        }
       }
     } catch (err) {
-      console.error('Error fetching active session:', err);
-      setError('Could not load active session.');
+      console.error('[ATTENDANCE] Load error:', err);
+      setError(err.message || 'Could not load attendance.');
+      setCreating(false);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const fetchGroups = async (sessionId) => {
+  useEffect(() => {
+    loadAttendance();
+  }, [loadAttendance]);
+
+  // Mark one person present.
+  const markAttendance = async personId => {
+    if (!session || marking) return;
+
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const res = await fetch(`/api/attendance/groups`, {
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
-      });
-      const data = await res.json();
-      setGroups(data);
-      if (data.length > 0) {
-        setSelectedGroup(data[0].id);
-        await fetchPeopleForGroup(data[0].id);
+      setMarking(personId);
+      setError('');
+
+      const authSession = await getAuthSession();
+
+      if (!authSession) {
+        setError('You must be logged in.');
+        return;
       }
-    } catch (err) {
-      console.error('Error fetching groups:', err);
-      setError('Could not load groups.');
-    }
-  };
 
-  const fetchPeopleForGroup = async (groupId) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const res = await fetch(`/api/attendance/people-for-group?group_id=${groupId}`, {
-        headers: { 'Authorization': `Bearer ${session.access_token}` },
-      });
-      const data = await res.json();
-      setPeople(data);
-    } catch (err) {
-      console.error('Error fetching people:', err);
-      setError('Could not load people for this group.');
-    }
-  };
-
-  const createSession = async () => {
-    const name = prompt('Enter session name (e.g., Sunday Worship):');
-    if (!name) return;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const res = await fetch('/api/attendance/create-session', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          name,
-          group_ids: groups.map(g => g.id),
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        await fetchActiveSession();
-      } else {
-        alert('Failed to create session: ' + data.error);
-      }
-    } catch (err) {
-      console.error('Error creating session:', err);
-      alert('Could not create session.');
-    }
-  };
-
-  const claimGroup = async (groupId) => {
-    if (!userName.trim()) {
-      alert('Please enter your name first.');
-      return;
-    }
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const res = await fetch('/api/attendance/claim-group', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({
-          session_id: session.session_id,
-          group_id: groupId,
-          user_name: userName,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        if (data.claimed) {
-          setClaimedGroups(prev => ({ ...prev, [groupId]: true }));
-          alert('Group claimed successfully!');
-        } else if (data.conflict) {
-          alert(`This group is already claimed by ${data.owner}.`);
-        }
-      } else {
-        alert('Could not claim this group. Please try again.');
-      }
-    } catch (err) {
-      console.error('Error claiming group:', err);
-      alert('Could not claim this group. Please try again.');
-    }
-  };
-
-  const markAttendance = async (personId, present) => {
-    if (!session) return;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
       const res = await fetch('/api/attendance/mark', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${authSession.access_token}`,
         },
         body: JSON.stringify({
           session_id: session.session_id,
           people_id: personId,
-          present,
-          user_id: userName,
-          group_id: selectedGroup,
         }),
       });
-      if (res.ok) {
-        setPeople(prev => prev.map(p =>
-          p.id === personId ? { ...p, marked: present } : p
-        ));
-      } else {
-        const data = await res.json();
-        alert('Failed to mark attendance: ' + data.error);
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(
+          data.error || 'Could not mark attendance.'
+        );
       }
+
+      // Optimistic UI update after successful database write.
+      setMarkedIds(prev => {
+        const next = new Set(prev);
+        next.add(personId);
+        return next;
+      });
     } catch (err) {
-      console.error('Error marking attendance:', err);
-      alert('Could not mark attendance.');
+      console.error('[ATTENDANCE] Mark error:', err);
+      setError(err.message || 'Could not mark attendance.');
+    } finally {
+      setMarking(null);
     }
   };
 
-  useEffect(() => {
-    fetchActiveSession();
-  }, [fetchActiveSession]);
+  const filteredPeople = people.filter(person => {
+    const name = `${person.first_name || ''} ${person.last_name || ''}`.toLowerCase();
+    const phone = (person.phone || '').toLowerCase();
+    const query = search.toLowerCase().trim();
 
-  const markedCount = people.filter(p => p.marked).length;
+    return !query || name.includes(query) || phone.includes(query);
+  });
+
+  const markedCount = markedIds.size;
 
   if (loading) {
     return (
-      <div className="loading-container">
-        <div className="loading-skeleton" />
-        <div className="loading-skeleton" style={{ width: '70%' }} />
-        <div className="loading-skeleton" style={{ width: '50%' }} />
+      <ModalShell onClose={onClose}>
+        <div style={{ padding: 28 }}>
+          <div className="attendance-loading">
+            <div className="loading-line" />
+            <div className="loading-line short" />
+            <div className="loading-line" />
+            <div className="loading-line" />
+          </div>
+        </div>
+
         <style jsx>{`
-          .loading-container {
-            max-width: 700px;
-            margin: 40px auto;
-            padding: 0 20px;
+          .attendance-loading {
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 12px;
           }
-          .loading-skeleton {
-            height: 60px;
-            border-radius: 26px;
-            background: linear-gradient(110deg, 
-              rgba(255,255,255,0.02) 25%, 
-              rgba(255,255,255,0.05) 50%, 
-              rgba(255,255,255,0.02) 75%
-            );
-            background-size: 200% 100%;
-            animation: shimmer 5s ease-in-out infinite;
+
+          .loading-line {
+            height: 62px;
+            border-radius: 18px;
+            background: rgba(255,255,255,.06);
+            animation: pulse 1.6s ease-in-out infinite;
           }
-          @keyframes shimmer {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
+
+          .loading-line.short {
+            width: 60%;
+          }
+
+          @keyframes pulse {
+            0%,100% { opacity: .45; }
+            50% { opacity: 1; }
           }
         `}</style>
-      </div>
+      </ModalShell>
     );
   }
 
   return (
-    <div className="attendance-container">
-      <div className="attendance-header">
-        <h1 className="attendance-title">Attendance</h1>
-        {session && (
-          <span className="session-badge">
-            {session.name}
-          </span>
-        )}
-      </div>
-
-      {error && (
-        <div className="attendance-error">
-          {error}
-        </div>
-      )}
-
-      <div className="fiducia-card session-card">
-        {session ? (
-          <>
-            <div className="session-info">
-              <div className="session-name">{session.name}</div>
-              <div className="session-date">
-                {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-              </div>
-            </div>
-            <div className="session-progress">
-              <div className="progress-label">
-                <span>{markedCount} present</span>
-                <span>of {people.length}</span>
-              </div>
-              <div className="progress-bar">
-                <div
-                  className="progress-fill"
-                  style={{ width: people.length > 0 ? `${(markedCount / people.length) * 100}%` : 0 }}
-                />
-              </div>
-            </div>
-            <button
-              onClick={fetchActiveSession}
-              className="fiducia-button fiducia-button-ghost session-refresh"
-            >
-              Refresh
-            </button>
-          </>
-        ) : (
-          <>
-            <p className="no-session-message">No active session.</p>
-            <button onClick={createSession} className="fiducia-button fiducia-button-primary">
-              Start Attendance
-            </button>
-          </>
-        )}
-      </div>
-
-      <div className="username-section">
-        <label className="username-label">
-          Your Name (for claiming groups)
-        </label>
-        <div className="username-display">{userName}</div>
-      </div>
-
-      {session && groups.length > 0 && (
-        <div className="groups-section">
-          <h2 className="section-title">Groups</h2>
-          <div className="groups-wrap">
-            {groups.map(g => (
-              <button
-                key={g.id}
-                onClick={() => {
-                  setSelectedGroup(g.id);
-                  fetchPeopleForGroup(g.id);
-                }}
-                className={`group-tab ${selectedGroup === g.id ? 'active' : ''}`}
-              >
-                {g.name}
-              </button>
-            ))}
+    <ModalShell onClose={onClose}>
+      <div className="attendance-modal">
+        <div className="attendance-top">
+          <div>
+            <div className="eyebrow">Attendance</div>
+            <h2>{session?.name || 'Attendance'}</h2>
+            <p>
+              Tap a person when you see them.
+            </p>
           </div>
-        </div>
-      )}
 
-      {session && selectedGroup && (
-        <div className="claim-section">
           <button
-            onClick={() => claimGroup(selectedGroup)}
-            disabled={claimedGroups[selectedGroup]}
-            className={`fiducia-button fiducia-button-secondary ${claimedGroups[selectedGroup] ? 'claimed' : ''}`}
+            onClick={onClose}
+            className="close-button"
+            aria-label="Close attendance"
           >
-            {claimedGroups[selectedGroup] ? '✓ Claimed' : 'Claim this group'}
+            ×
           </button>
         </div>
-      )}
 
-      {session && people.length > 0 && (
-        <div className="people-section">
-          <div className="people-header">
-            <h2 className="section-title">People</h2>
-            <span className="people-count">{markedCount} marked</span>
+        {error && (
+          <div className="error-box">
+            {error}
+            <button onClick={loadAttendance}>Try again</button>
           </div>
-          <div className="people-list">
-            {people.map(p => (
-              <div
-                key={p.id}
-                className={`fiducia-card person-card ${p.marked ? 'marked' : ''}`}
-              >
-                <div className="person-info">
-                  <div className="person-name">{p.first_name}</div>
-                  <div className="person-phone">{p.phone || 'No phone'}</div>
-                </div>
-                <button
-                  onClick={() => markAttendance(p.id, !p.marked)}
-                  className={`fiducia-button fiducia-button-ghost button-mark ${p.marked ? 'marked' : ''}`}
-                >
-                  {p.marked ? 'Present ✓' : 'Mark Present'}
-                </button>
-              </div>
-            ))}
+        )}
+
+        <div className="attendance-summary">
+          <div>
+            <strong>{markedCount}</strong>
+            <span>present</span>
+          </div>
+
+          <div>
+            <strong>{people.length}</strong>
+            <span>people</span>
           </div>
         </div>
-      )}
+
+        <input
+          type="text"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search people..."
+          className="search-input"
+        />
+
+        {creating && (
+          <div className="creating">
+            Preparing today's attendance...
+          </div>
+        )}
+
+        <div className="people-list">
+          {filteredPeople.length === 0 ? (
+            <div className="empty-state">
+              {people.length === 0
+                ? 'No people have been added yet.'
+                : 'No person matches your search.'}
+            </div>
+          ) : (
+            filteredPeople.map(person => {
+              const present = markedIds.has(person.id);
+              const isMarking = marking === person.id;
+
+              return (
+                <div
+                  key={person.id}
+                  className={`person-row ${present ? 'present' : ''}`}
+                >
+                  <div className="person-details">
+                    <div className="person-name">
+                      {person.first_name} {person.last_name || ''}
+                    </div>
+
+                    <div className="person-meta">
+                      {person.phone || person.type || 'Person'}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => !present && markAttendance(person.id)}
+                    disabled={present || marking !== null}
+                    className={`mark-button ${present ? 'done' : ''}`}
+                  >
+                    {isMarking
+                      ? 'Saving...'
+                      : present
+                      ? 'Present ✓'
+                      : 'Mark Present'}
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
 
       <style jsx>{`
-        .attendance-container {
-          max-width: 700px;
-          margin: 0 auto;
-          padding: 20px;
-          padding-bottom: 80px;
+        .attendance-modal {
+          padding: 26px;
+          max-height: 88vh;
+          overflow-y: auto;
         }
 
-        @media (min-width: 768px) {
-          .attendance-container {
-            padding: 40px 20px;
-          }
-        }
-
-        .attendance-header {
+        .attendance-top {
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          margin-bottom: 24px;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-        .attendance-title {
-          font-size: clamp(24px, 4vw, 32px);
-          font-weight: 600;
-          color: #f0f0f0;
-          margin: 0;
-        }
-        .session-badge {
-          font-size: 0.8rem;
-          padding: 4px 14px;
-          border-radius: 20px;
-          background: rgba(212, 175, 55, 0.15);
-          color: #D4AF37;
-          border: 1px solid rgba(212, 175, 55, 0.2);
-          white-space: nowrap;
-        }
-
-        .attendance-error {
-          background: rgba(239, 68, 68, 0.1);
-          border: 1px solid #EF4444;
-          border-radius: 12px;
-          padding: 12px 16px;
+          gap: 20px;
+          align-items: flex-start;
           margin-bottom: 20px;
-          color: #EF4444;
-          font-size: 0.9rem;
         }
 
-        .session-card {
-          display: flex;
-          flex-wrap: wrap;
-          align-items: center;
-          justify-content: space-between;
-          gap: 16px;
-          padding: 20px 24px;
-          margin-bottom: 24px;
+        .eyebrow {
+          font-size: 12px;
+          letter-spacing: 1.5px;
+          text-transform: uppercase;
+          color: rgba(255,255,255,.38);
+          margin-bottom: 6px;
         }
-        .session-info {
-          display: flex;
-          flex-direction: column;
-          gap: 2px;
-          flex: 1;
-        }
-        .session-name {
-          font-weight: 600;
-          color: #f0f0f0;
-          font-size: 1.1rem;
-        }
-        .session-date {
-          color: rgba(255,255,255,0.5);
-          font-size: 0.8rem;
-        }
-        .session-progress {
-          flex: 2;
-          min-width: 120px;
-        }
-        .progress-label {
-          display: flex;
-          justify-content: space-between;
-          font-size: 0.8rem;
-          color: rgba(255,255,255,0.5);
-          margin-bottom: 4px;
-        }
-        .progress-bar {
-          height: 4px;
-          background: rgba(255,255,255,0.06);
-          border-radius: 4px;
-          overflow: hidden;
-        }
-        .progress-fill {
-          height: 100%;
-          background: #D4AF37;
-          border-radius: 4px;
-          transition: width 0.4s ease;
-        }
-        .session-refresh {
-          margin-left: auto;
-        }
-        .no-session-message {
-          color: rgba(255,255,255,0.5);
+
+        h2 {
           margin: 0;
-        }
-
-        .username-section {
-          margin-bottom: 24px;
-        }
-        .username-label {
-          display: block;
-          color: rgba(255,255,255,0.5);
-          font-size: 0.85rem;
-          margin-bottom: 4px;
-        }
-        .username-display {
-          padding: 10px 14px;
-          border-radius: 12px;
-          border: 1px solid rgba(255,255,255,0.06);
-          background: rgba(20,25,40,0.6);
-          color: #f0f0f0;
-          font-size: 1rem;
-          outline: none;
-          cursor: default;
-        }
-
-        .groups-section {
-          margin-bottom: 24px;
-        }
-        .section-title {
-          font-size: 1rem;
+          color: #f5f5f5;
+          font-size: 28px;
           font-weight: 600;
-          color: #f0f0f0;
-          margin: 0 0 8px 0;
         }
-        .groups-wrap {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          align-items: center;
+
+        .attendance-top p {
+          margin: 7px 0 0;
+          color: rgba(255,255,255,.5);
+          font-size: 15px;
         }
-        .group-tab {
-          padding: 8px 16px;
-          border-radius: 30px;
-          border: 1px solid rgba(255,255,255,0.08);
-          background: transparent;
-          color: rgba(255,255,255,0.6);
-          font-size: 0.85rem;
+
+        .close-button {
+          width: 38px;
+          height: 38px;
+          border: 0;
+          border-radius: 50%;
+          background: rgba(255,255,255,.07);
+          color: #fff;
+          font-size: 28px;
+          line-height: 1;
           cursor: pointer;
-          transition: all 0.2s;
-          touch-action: manipulation;
-          white-space: nowrap;
-          min-height: 40px;
-          flex-shrink: 0;
-        }
-        .group-tab.active {
-          background: rgba(212, 175, 55, 0.1);
-          border-color: rgba(212, 175, 55, 0.3);
-          color: #D4AF37;
-          font-weight: 500;
-        }
-        .group-tab:active {
-          transform: scale(0.96);
         }
 
-        .claim-section {
-          margin-bottom: 24px;
-        }
-        .claim-section .fiducia-button {
-          width: 100%;
-        }
-        .claim-section .claimed {
-          opacity: 0.5;
-          cursor: default;
-        }
-
-        .people-section {
-          margin-top: 24px;
-        }
-        .people-header {
+        .attendance-summary {
           display: flex;
-          justify-content: space-between;
-          align-items: center;
+          gap: 10px;
           margin-bottom: 16px;
         }
-        .people-count {
-          font-size: 0.85rem;
-          color: rgba(255,255,255,0.5);
+
+        .attendance-summary > div {
+          flex: 1;
+          padding: 14px 16px;
+          border-radius: 18px;
+          background: rgba(255,255,255,.045);
+          border: 1px solid rgba(255,255,255,.07);
         }
+
+        .attendance-summary strong {
+          display: block;
+          font-size: 25px;
+          color: #f5f5f5;
+        }
+
+        .attendance-summary span {
+          font-size: 12px;
+          color: rgba(255,255,255,.4);
+        }
+
+        .search-input {
+          width: 100%;
+          box-sizing: border-box;
+          padding: 14px 16px;
+          margin-bottom: 14px;
+          border-radius: 16px;
+          border: 1px solid rgba(255,255,255,.1);
+          background: rgba(255,255,255,.055);
+          color: #fff;
+          outline: none;
+          font-size: 15px;
+        }
+
+        .search-input::placeholder {
+          color: rgba(255,255,255,.35);
+        }
+
         .people-list {
           display: flex;
           flex-direction: column;
-          gap: 10px;
+          gap: 8px;
         }
 
-        .person-card {
+        .person-row {
           display: flex;
-          justify-content: space-between;
           align-items: center;
-          padding: 16px 20px;
+          justify-content: space-between;
           gap: 12px;
-          flex-wrap: nowrap;
-          transition: border-color 0.3s, background 0.3s;
-          border-radius: 26px;
+          padding: 14px;
+          border-radius: 18px;
+          background: rgba(255,255,255,.045);
+          border: 1px solid rgba(255,255,255,.07);
         }
-        .person-card.marked {
-          background: rgba(52, 211, 153, 0.04);
-          border-color: rgba(52, 211, 153, 0.15);
+
+        .person-row.present {
+          background: rgba(76,175,80,.1);
+          border-color: rgba(76,175,80,.3);
         }
-        .person-info {
-          display: flex;
-          flex-direction: column;
+
+        .person-details {
           min-width: 0;
-          flex: 1;
         }
+
         .person-name {
-          font-weight: 600;
-          color: #f0f0f0;
-          font-size: 1.05rem;
-          line-height: 1.3;
-        }
-        .person-phone {
-          font-size: 0.8rem;
-          color: rgba(255,255,255,0.4);
+          color: #f3f3f3;
+          font-weight: 500;
+          word-break: break-word;
         }
 
-        .button-mark {
-          padding: 6px 16px;
-          font-size: 0.8rem;
-          min-height: 36px;
+        .person-meta {
+          color: rgba(255,255,255,.35);
+          font-size: 12px;
+          margin-top: 4px;
+        }
+
+        .mark-button {
           flex-shrink: 0;
-          white-space: nowrap;
-        }
-        .button-mark.marked {
-          background: rgba(52, 211, 153, 0.1);
-          border-color: rgba(52, 211, 153, 0.2);
-          color: #34D399;
+          border: 0;
+          border-radius: 999px;
+          padding: 9px 13px;
+          background: rgba(255,255,255,.08);
+          color: #f5f5f5;
+          cursor: pointer;
+          font-weight: 500;
         }
 
-        @media (max-width: 480px) {
-          .person-card {
-            padding: 12px 14px;
-          }
-          .person-name {
-            font-size: 0.95rem;
-          }
-          .button-mark {
-            padding: 4px 12px;
-            font-size: 0.7rem;
-            min-height: 32px;
-          }
-          .group-tab {
-            padding: 6px 12px;
-            font-size: 0.75rem;
-            min-height: 32px;
-          }
-          .session-card {
-            flex-direction: column;
-            align-items: stretch;
-          }
-          .session-refresh {
-            margin-left: 0;
-            align-self: flex-start;
-          }
+        .mark-button.done {
+          background: rgba(76,175,80,.18);
+          color: #8ee09a;
+          cursor: default;
         }
-        @media (min-width: 481px) {
-          .person-card {
-            padding: 14px 20px;
-          }
-          .person-name {
-            font-size: 1.05rem;
-          }
-          .button-mark {
-            padding: 8px 20px;
-            font-size: 0.85rem;
-            min-height: 40px;
-          }
+
+        .mark-button:disabled:not(.done) {
+          opacity: .6;
+          cursor: wait;
         }
-        @media (min-width: 768px) {
-          .person-card {
-            padding: 16px 24px;
+
+        .error-box {
+          padding: 12px 14px;
+          border-radius: 14px;
+          background: rgba(239,68,68,.1);
+          border: 1px solid rgba(239,68,68,.3);
+          color: #ff8f8f;
+          margin-bottom: 14px;
+        }
+
+        .error-box button {
+          display: block;
+          margin-top: 8px;
+          border: 0;
+          background: transparent;
+          color: #fff;
+          text-decoration: underline;
+          cursor: pointer;
+        }
+
+        .creating,
+        .empty-state {
+          text-align: center;
+          padding: 30px 15px;
+          color: rgba(255,255,255,.4);
+        }
+
+        @media (max-width: 520px) {
+          .attendance-modal {
+            padding: 20px;
+          }
+
+          .person-row {
+            align-items: flex-start;
+          }
+
+          .mark-button {
+            padding: 8px 10px;
+            font-size: 12px;
           }
         }
       `}</style>
-    </div>
+    </ModalShell>
   );
 }
+
+function ModalShell({ children, onClose }) {
+  return (
+    <div
+      onMouseDown={e => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        background: 'rgba(0,0,0,.72)',
+        backdropFilter: 'blur(14px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div
+        className="fiducia-card"
+        style={{
+          width: '100%',
+          maxWidth: 620,
+          maxHeight: '92vh',
+          overflow: 'hidden',
+          borderRadius: 28,
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+      }
