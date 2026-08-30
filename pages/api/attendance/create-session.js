@@ -1,50 +1,26 @@
 // pages/api/attendance/create-session.js
-// Canonical organization-scoped attendance session creation.
+// Creates an organization-scoped active attendance session.
+// This flow intentionally does NOT depend on the legacy group tables.
 
 import pool from '../../../lib/db';
 import { withOrg } from '../../../lib/apiHelpers';
 
 async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).end();
-  }
+  if (req.method !== 'POST') return res.status(405).end();
 
-  const { name, sections } = req.body || {};
+  const { name } = req.body || {};
 
   if (typeof name !== 'string' || !name.trim()) {
-    return res.status(400).json({
-      error: 'Session name required',
-    });
-  }
-
-  if (sections !== undefined && !Array.isArray(sections)) {
-    return res.status(400).json({
-      error: 'sections must be an array',
-    });
-  }
-
-  const cleanSections = Array.isArray(sections)
-    ? [...new Set(
-        sections
-          .filter(s => typeof s === 'string')
-          .map(s => s.trim())
-          .filter(Boolean)
-      )]
-    : [];
-
-  if (!cleanSections.length) {
-    cleanSections.push('All');
+    return res.status(400).json({ error: 'Session name required' });
   }
 
   const orgId = req.org.id;
   const userId = req.user.id;
-
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
-    // Create the attendance session.
     const sessionRes = await client.query(
       `INSERT INTO sessions (
          organization_id,
@@ -61,25 +37,6 @@ async function handler(req, res) {
 
     const session = sessionRes.rows[0];
 
-    // Create the sections belonging to this session.
-    const createdSections = [];
-
-    for (const sectionName of cleanSections) {
-      const sectionRes = await client.query(
-        `INSERT INTO session_sections (
-           session_id,
-           name,
-           created_at,
-           organization_id
-         )
-         VALUES ($1, $2, NOW(), $3)
-         RETURNING id, name`,
-        [session.id, sectionName, orgId]
-      );
-
-      createdSections.push(sectionRes.rows[0]);
-    }
-
     await client.query('COMMIT');
 
     return res.status(200).json({
@@ -87,12 +44,10 @@ async function handler(req, res) {
       name: session.name,
       status: session.status,
       started_at: session.started_at,
-      sections: createdSections,
+      created_at: session.created_at,
     });
   } catch (err) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {}
+    try { await client.query('ROLLBACK'); } catch {}
 
     console.error('[ATTENDANCE] Create session error:', err);
 
