@@ -1,13 +1,12 @@
 // pages/index.js
-// ARIA Today — calm daily home.
-// One Moment leads. Signals, patterns and actions support it.
-// ARIA observes; humans decide.
+// ARIA Today — production homepage.
+// One source of truth: /api/aria/home.
+// Homepage states: EMPTY → STARTING → OBSERVING → PATTERN → ACTION/ATTENTION.
 
 import{useEffect,useState}from'react';
 import{useRouter}from'next/router';
 import{supabase}from'../lib/supabaseClient';
 import Layout from'../components/Layout';
-import CareQueueList from'../components/CareQueueList';
 import ScanModal from'../components/ScanModal';
 import FirstExperience from'../components/FirstExperience';
 import{useOnboarding}from'../components/OnboardingProvider';
@@ -17,14 +16,15 @@ export default function ARIAHome(){
   const onboarding=useOnboarding();
   const[data,setData]=useState(null);
   const[loading,setLoading]=useState(true);
-  const[showScanModal,setShowScanModal]=useState(false);
+  const[showScan,setShowScan]=useState(false);
 
   useEffect(()=>{
     let active=true;
 
-    async function init(){
+    async function load(){
       try{
         const{data:{session}}=await supabase.auth.getSession();
+
         if(!active)return;
 
         if(!session){
@@ -32,14 +32,21 @@ export default function ARIAHome(){
           return;
         }
 
-        const res=await fetch('/api/aria/daily',{
-          headers:{Authorization:`Bearer ${session.access_token}`}
+        const res=await fetch('/api/aria/home',{
+          headers:{
+            Authorization:`Bearer ${session.access_token}`
+          }
         });
 
         if(!active)return;
 
-        if(res.ok)setData(await res.json());
-        else console.error('[ARIA] Daily endpoint failed:',res.status);
+        if(!res.ok){
+          console.error('[ARIA] Home API failed:',res.status);
+          setData(null);
+          return;
+        }
+
+        setData(await res.json());
       }catch(err){
         if(active)console.error('[ARIA] Home load error:',err);
       }finally{
@@ -47,8 +54,8 @@ export default function ARIAHome(){
       }
     }
 
-    init();
-    return()=>{active=false;};
+    load();
+    return()=>{active=false};
   },[router]);
 
   if(loading){
@@ -61,60 +68,53 @@ export default function ARIAHome(){
     );
   }
 
-  const signals=data?.signals||{};
-  const observations=signals.observations||[];
-  const patterns=signals.patterns||[];
-  const actions=signals.actions||[];
+  if(!data){
+    return(
+      <Layout>
+        <div style={{maxWidth:900,margin:'0 auto',padding:'40px 20px'}}>
+          <h1 style={{fontSize:28,color:'#f0f0f0'}}>ARIA Today</h1>
+          <p style={{color:'rgba(255,255,255,.6)'}}>
+            ARIA could not load the organization view.
+          </p>
+          <button
+            className="fiducia-button fiducia-button-primary"
+            onClick={()=>window.location.reload()}
+          >
+            Try again
+          </button>
+        </div>
+      </Layout>
+    );
+  }
 
-  const hasSignals=
-    observations.length>0||
-    patterns.length>0||
-    actions.length>0;
+  const isEmpty=data.state==='empty';
+  const showExperience=
+    isEmpty&&
+    onboarding?.loaded&&
+    onboarding.enabled&&
+    !onboarding.isExperienced('home');
 
-  const peopleCount=Number(data?.organization?.peopleCount)||0;
-  const sessions=Number(data?.organization?.sessionsLast30Days)||0;
-
-  // The first-time state is intentionally different from a healthy
-  // organization with no current signals.
-  const isJustStarting=
-    peopleCount<=1&&
-    sessions===0&&
-    !hasSignals;
-
-  const moment=isJustStarting
-    ? "You're just getting started."
-    : data?.summary||'ARIA is watching for meaningful changes.';
-
-  const nextAction=isJustStarting
-    ? 'Scan your first register and ARIA will begin learning the people and patterns in your community.'
-    : data?.nextAction||'Nothing needs your attention right now.';
+  const stats=data.stats||{};
+  const signals=data.signals||{};
+  const next=data.nextAction||{};
 
   return(
     <Layout>
-      <div style={{
-        maxWidth:900,
-        margin:'0 auto',
-        padding:'40px 20px 60px'
-      }}>
+      <div style={{maxWidth:900,margin:'0 auto',padding:'40px 20px'}}>
 
-        {onboarding?.loaded&&
-         onboarding.enabled&&
-         !onboarding.isExperienced('home')&&(
+        {showExperience&&(
           <FirstExperience
             experience="home"
             onComplete={()=>onboarding.completeExperience('home')}
           />
         )}
 
-        {/* ARIA MOMENT — the emotional center of the home. */}
-        <section style={{
-          padding:'28px 0 36px',
-          maxWidth:720
-        }}>
+        {/* ARIA HERO — the single emotional focal point. */}
+        <section style={{marginBottom:36}}>
           <div style={{
-            color:'rgba(255,255,255,.35)',
-            fontSize:12,
-            letterSpacing:1.2,
+            color:'rgba(255,255,255,.4)',
+            fontSize:13,
+            letterSpacing:'.08em',
             textTransform:'uppercase',
             marginBottom:12
           }}>
@@ -122,154 +122,127 @@ export default function ARIAHome(){
           </div>
 
           <h1 style={{
-            fontSize:'clamp(30px,5vw,46px)',
+            fontSize:'clamp(30px,5vw,44px)',
             lineHeight:1.12,
-            fontWeight:500,
-            letterSpacing:-1.2,
+            fontWeight:600,
             color:'#f0f0f0',
-            margin:0
+            margin:'0 0 14px'
           }}>
-            {moment}
+            {data.title}
           </h1>
 
-          {!isJustStarting&&(
-            <p style={{
-              fontSize:17,
-              lineHeight:1.6,
-              color:'rgba(255,255,255,.55)',
-              margin:'16px 0 0',
-              maxWidth:650
-            }}>
-              {data?.summary}
-            </p>
-          )}
+          <p
+            className="aria-speaks"
+            style={{
+              fontSize:19,
+              lineHeight:1.55,
+              color:'rgba(255,255,255,.68)',
+              maxWidth:720,
+              margin:0,
+              whiteSpace:'pre-line'
+            }}
+          >
+            {data.summary}
+          </p>
         </section>
 
-        {/* FIRST MOMENT — give a new organization one clear path forward. */}
-        {isJustStarting&&(
-          <section className="fiducia-card" style={{
-            padding:'22px 20px',
-            marginBottom:36
+        {/* REAL ORGANIZATION STATS — never shown as fake zero-data copy. */}
+        {!isEmpty&&(
+          <section style={{
+            display:'grid',
+            gridTemplateColumns:'repeat(3,minmax(0,1fr))',
+            gap:10,
+            marginBottom:32
           }}>
+            <Stat label="PEOPLE" value={stats.people}/>
+            <Stat label="30-DAY SESSIONS" value={stats.sessions30}/>
+            <Stat label="ACTIVE ATTENDEES" value={stats.activeAttendees30}/>
+          </section>
+        )}
+
+        {/* ONE CLEAR NEXT STEP. */}
+        <section style={{marginBottom:36}}>
+          <h2 style={{
+            fontSize:18,
+            fontWeight:500,
+            color:'#f0f0f0',
+            marginBottom:12
+          }}>
+            What should I do?
+          </h2>
+
+          <div className="fiducia-card" style={{padding:'18px 20px'}}>
             <div style={{
               color:'#f0f0f0',
               fontSize:16,
-              fontWeight:500,
-              marginBottom:7
+              fontWeight:500
             }}>
-              Begin with your people.
+              {next.title}
             </div>
 
-            <p style={{
-              color:'rgba(255,255,255,.5)',
+            <div style={{
+              color:'rgba(255,255,255,.55)',
               fontSize:14,
-              lineHeight:1.55,
-              margin:'0 0 18px',
-              maxWidth:600
+              lineHeight:1.5,
+              marginTop:5
             }}>
-              Scan your first register and ARIA will start building the
-              memory needed to notice meaningful changes over time.
-            </p>
-
-            <button
-              onClick={()=>setShowScanModal(true)}
-              className="fiducia-button fiducia-button-primary"
-            >
-              Scan First Register
-            </button>
-          </section>
-        )}
-
-        {/* NEXT ACTION — always one clear recommendation. */}
-        {!isJustStarting&&(
-          <section style={{marginBottom:36}}>
-            <div style={{
-              color:'rgba(255,255,255,.35)',
-              fontSize:12,
-              letterSpacing:1,
-              textTransform:'uppercase',
-              marginBottom:10
-            }}>
-              Next step
+              {next.description}
             </div>
 
-            <div className="fiducia-card" style={{
-              padding:'18px 20px'
-            }}>
+            {next.type==='SCAN'&&(
+              <button
+                onClick={()=>setShowScan(true)}
+                className="fiducia-button fiducia-button-primary"
+                style={{marginTop:14}}
+              >
+                Scan Register
+              </button>
+            )}
+
+            {next.type==='SCAN_OR_SESSION'&&(
               <div style={{
-                color:'#f0f0f0',
-                fontSize:16,
-                lineHeight:1.5
+                display:'flex',
+                gap:10,
+                flexWrap:'wrap',
+                marginTop:14
               }}>
-                {nextAction}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* PATTERNS — prevention layer. */}
-        {patterns.length>0&&(
-          <section style={{marginBottom:36}}>
-            <h2 style={{
-              fontSize:18,
-              fontWeight:500,
-              color:'#f0f0f0',
-              margin:'0 0 12px'
-            }}>
-              Patterns ARIA noticed
-            </h2>
-
-            <div style={{
-              display:'flex',
-              flexDirection:'column',
-              gap:8
-            }}>
-              {patterns.slice(0,5).map((p,i)=>(
-                <div
-                  key={p.personId||i}
-                  className="fiducia-card"
-                  style={{padding:'14px 20px'}}
+                <button
+                  onClick={()=>setShowScan(true)}
+                  className="fiducia-button fiducia-button-primary"
                 >
-                  <div style={{
-                    color:'#f0f0f0',
-                    fontWeight:500
-                  }}>
-                    {p.name||'Person'}
-                  </div>
+                  Scan Register
+                </button>
+                <a
+                  href="/people?tab=attendance"
+                  className="fiducia-button fiducia-button-secondary"
+                >
+                  Record Attendance
+                </a>
+              </div>
+            )}
 
-                  <div style={{
-                    color:'rgba(255,255,255,.55)',
-                    fontSize:14,
-                    lineHeight:1.5,
-                    marginTop:5
-                  }}>
-                    {p.message}
-                  </div>
+            {['REVIEW','REVIEW_PATTERN'].includes(next.type)&&(
+              <a
+                href="/people?tab=review"
+                className="fiducia-button fiducia-button-secondary"
+                style={{display:'inline-block',marginTop:14}}
+              >
+                Review
+              </a>
+            )}
+          </div>
+        </section>
 
-                  <div style={{
-                    color:'rgba(255,255,255,.3)',
-                    fontSize:12,
-                    marginTop:7
-                  }}>
-                    Pattern · {p.evidence.sessionsAttended}/
-                    {p.evidence.sessionsObserved} recent sessions attended
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* OBSERVATIONS — evidence layer. */}
-        {observations.length>0&&(
+        {/* SIGNALS — shown only when ARIA actually has signals. */}
+        {data.observations?.length>0&&(
           <section style={{marginBottom:36}}>
             <h2 style={{
               fontSize:18,
               fontWeight:500,
               color:'#f0f0f0',
-              margin:'0 0 12px'
+              marginBottom:12
             }}>
-              Signals
+              What ARIA noticed
             </h2>
 
             <div style={{
@@ -277,68 +250,99 @@ export default function ARIAHome(){
               flexDirection:'column',
               gap:8
             }}>
-              {observations.slice(0,5).map((o,i)=>(
+              {data.observations.slice(0,5).map((o,i)=>(
                 <div
                   key={o.id||i}
                   className="fiducia-card"
-                  style={{padding:'14px 20px'}}
+                  style={{padding:'14px 18px'}}
                 >
                   <div style={{
                     display:'flex',
-                    justifyContent:'space-between',
-                    gap:12
+                    alignItems:'center',
+                    gap:8
                   }}>
+                    <span style={{
+                      width:8,
+                      height:8,
+                      borderRadius:'50%',
+                      background:
+                        o.severity==='critical'?'#EF4444':
+                        o.severity==='high'?'#F59E0B':
+                        o.severity==='medium'?'#FBBF24':
+                        '#34D399'
+                    }}/>
                     <span style={{
                       color:'#f0f0f0',
                       fontWeight:500
                     }}>
-                      {o.name||
-                       o.observationType?.replace(/_/g,' ')||
-                       'ARIA signal'}
+                      {String(o.type||'Signal').replace(/_/g,' ')}
                     </span>
-
-                    <span style={{
-                      color:'rgba(255,255,255,.4)',
-                      fontSize:12
-                    }}>
-                      {o.severity||'medium'}
-                    </span>
-                  </div>
-
-                  <div style={{
-                    color:'rgba(255,255,255,.4)',
-                    fontSize:12,
-                    marginTop:6
-                  }}>
-                    Confidence {Math.round(o.confidence*100)}%
-                    {' · '}
-                    Attention {o.attentionScore}
                   </div>
 
                   {o.evidence?.inference&&(
-                    <div style={{
-                      color:'rgba(255,255,255,.45)',
-                      fontSize:13,
-                      lineHeight:1.5,
-                      marginTop:6
+                    <p style={{
+                      margin:'7px 0 0',
+                      color:'rgba(255,255,255,.55)',
+                      fontSize:14,
+                      lineHeight:1.45
                     }}>
                       {o.evidence.inference}
-                    </div>
+                    </p>
                   )}
+
+                  <div style={{
+                    marginTop:6,
+                    color:'rgba(255,255,255,.35)',
+                    fontSize:12
+                  }}>
+                    Confidence {Math.round(Number(o.confidence||0)*100)}%
+                    {' · '}
+                    Attention {Number(o.attention_score)||0}
+                  </div>
                 </div>
               ))}
             </div>
           </section>
         )}
 
-        {/* RECOMMENDATIONS — human approval remains required. */}
-        {actions.length>0&&(
+        {/* PATTERN SUMMARY — makes ARIA's predictive purpose visible. */}
+        {signals.slippingPeople>0&&(
           <section style={{marginBottom:36}}>
             <h2 style={{
               fontSize:18,
               fontWeight:500,
               color:'#f0f0f0',
-              margin:'0 0 12px'
+              marginBottom:12
+            }}>
+              Emerging pattern
+            </h2>
+
+            <div className="fiducia-card" style={{padding:'16px 20px'}}>
+              <div style={{color:'#f0f0f0',fontWeight:500}}>
+                {signals.slippingPeople} people may need a closer look
+              </div>
+              <p style={{
+                margin:'6px 0 0',
+                color:'rgba(255,255,255,.5)',
+                fontSize:14,
+                lineHeight:1.5
+              }}>
+                ARIA found a repeated attendance pattern. This is an
+                observation based on recorded history, not a prediction
+                of what anyone will do.
+              </p>
+            </div>
+          </section>
+        )}
+
+        {/* ACTIONS — human approval remains mandatory. */}
+        {data.actions?.length>0&&(
+          <section style={{marginBottom:36}}>
+            <h2 style={{
+              fontSize:18,
+              fontWeight:500,
+              color:'#f0f0f0',
+              marginBottom:12
             }}>
               Recommended actions
             </h2>
@@ -348,34 +352,23 @@ export default function ARIAHome(){
               flexDirection:'column',
               gap:8
             }}>
-              {actions.slice(0,5).map((a,i)=>(
+              {data.actions.slice(0,5).map((a,i)=>(
                 <div
                   key={a.id||i}
                   className="fiducia-card"
-                  style={{padding:'14px 20px'}}
+                  style={{padding:'14px 18px'}}
                 >
-                  <div style={{
-                    color:'#f0f0f0',
-                    fontWeight:500
-                  }}>
-                    {a.name||'Organization'}
+                  <div style={{color:'#f0f0f0',fontWeight:500}}>
+                    {a.first_name
+                      ?`${a.first_name} · ${String(a.type).replace(/_/g,' ')}`
+                      :String(a.type).replace(/_/g,' ')}
                   </div>
-
                   <div style={{
-                    color:'rgba(255,255,255,.55)',
-                    fontSize:14,
-                    lineHeight:1.5,
+                    color:'rgba(255,255,255,.4)',
+                    fontSize:12,
                     marginTop:5
                   }}>
-                    {a.nextAction}
-                  </div>
-
-                  <div style={{
-                    color:'rgba(255,255,255,.3)',
-                    fontSize:12,
-                    marginTop:7
-                  }}>
-                    {a.priority} · {a.status}
+                    {a.priority} priority · human review required
                   </div>
                 </div>
               ))}
@@ -383,95 +376,93 @@ export default function ARIAHome(){
           </section>
         )}
 
-        {/* QUIET STATE — only one reassurance, not several. */}
-        {!isJustStarting&&!hasSignals&&(
-          <section style={{
-            padding:'12px 0 24px',
-            color:'rgba(255,255,255,.38)',
-            fontSize:14
-          }}>
-            Nothing significant needs your attention today.
-          </section>
-        )}
-
-        {/* ORGANIZATION CONTEXT — intentionally quiet. */}
-        {!isJustStarting&&data?.organization&&(
+        {/* QUIET STATE — only one reassurance. */}
+        {!isEmpty&&
+         data.observations?.length===0&&
+         data.actions?.length===0&&
+         signals.slippingPeople===0&&(
           <div style={{
-            display:'flex',
-            gap:20,
-            flexWrap:'wrap',
-            padding:'16px 0',
-            marginBottom:28,
-            borderTop:'1px solid rgba(255,255,255,.06)',
-            borderBottom:'1px solid rgba(255,255,255,.06)'
+            color:'rgba(255,255,255,.35)',
+            fontSize:13,
+            marginBottom:36
           }}>
-            <span style={{color:'rgba(255,255,255,.35)',fontSize:12}}>
-              {peopleCount} people
-            </span>
-            <span style={{color:'rgba(255,255,255,.35)',fontSize:12}}>
-              {sessions} sessions in 30 days
-            </span>
-            <span style={{color:'rgba(255,255,255,.35)',fontSize:12}}>
-              {data.organization.activeAttendeesLast30Days||0} active attendees
-            </span>
+            ARIA is watching for meaningful changes and will surface
+            patterns when there is enough evidence.
           </div>
         )}
 
-        {/* CARE QUEUE — only show when it has something to say. */}
-        {hasSignals&&<CareQueueList/>}
+        <div style={{
+          display:'flex',
+          gap:10,
+          flexWrap:'wrap',
+          marginTop:20
+        }}>
+          <button
+            onClick={()=>setShowScan(true)}
+            className="fiducia-button fiducia-button-primary"
+          >
+            Scan Register
+          </button>
 
-        {!isJustStarting&&(
-          <div style={{
-            display:'flex',
-            gap:12,
-            marginTop:28,
-            flexWrap:'wrap'
-          }}>
-            <button
-              onClick={()=>setShowScanModal(true)}
-              className="fiducia-button fiducia-button-primary"
-            >
-              Scan Register
-            </button>
+          <a
+            href="/people?tab=community"
+            className="fiducia-button fiducia-button-secondary"
+          >
+            People
+          </a>
 
-            <a
-              href="/people?tab=community"
-              className="fiducia-button fiducia-button-secondary"
-            >
-              People
-            </a>
+          <a
+            href="/people?tab=review"
+            className="fiducia-button fiducia-button-ghost"
+          >
+            Review
+          </a>
 
-            <a
-              href="/people?tab=review"
-              className="fiducia-button fiducia-button-ghost"
-            >
-              Review
-            </a>
+          <a
+            href="/people?tab=attendance"
+            className="fiducia-button fiducia-button-ghost"
+          >
+            Attendance
+          </a>
+        </div>
 
-            <a
-              href="/people?tab=attendance"
-              className="fiducia-button fiducia-button-ghost"
-            >
-              Attendance
-            </a>
-          </div>
-        )}
-
-        {!isJustStarting&&(
-          <div style={{
-            marginTop:50,
-            color:'rgba(255,255,255,.25)',
-            fontSize:13
-          }}>
-            Every Person. Every Story. Remembered.
-          </div>
-        )}
+        <div style={{
+          marginTop:50,
+          paddingTop:24,
+          borderTop:'1px solid rgba(255,255,255,.05)',
+          color:'rgba(255,255,255,.3)',
+          fontSize:13
+        }}>
+          Every Person. Every Story. Remembered.
+        </div>
       </div>
 
       <ScanModal
-        isOpen={showScanModal}
-        onClose={()=>setShowScanModal(false)}
+        isOpen={showScan}
+        onClose={()=>setShowScan(false)}
       />
     </Layout>
   );
-                                                       }
+}
+
+function Stat({label,value}){
+  return(
+    <div className="fiducia-card" style={{padding:'15px 16px'}}>
+      <div style={{
+        color:'rgba(255,255,255,.35)',
+        fontSize:10,
+        letterSpacing:'.08em'
+      }}>
+        {label}
+      </div>
+      <div style={{
+        color:'#f0f0f0',
+        fontSize:24,
+        fontWeight:600,
+        marginTop:4
+      }}>
+        {value}
+      </div>
+    </div>
+  );
+      }
