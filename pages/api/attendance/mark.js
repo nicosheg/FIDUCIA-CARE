@@ -1,15 +1,22 @@
 // pages/api/attendance/mark.js
 // Canonical attendance marking endpoint.
-// Attendance is organization + active-session scoped.
-// Legacy session/group assignment tables are intentionally not used.
+// The Home Attendance modal marks people directly.
+// No group claim or session_users assignment is required.
 
 import pool from '../../../lib/db';
 import { withOrg } from '../../../lib/apiHelpers';
 
 export default withOrg(async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end();
+  if (req.method !== 'POST') {
+    return res.status(405).json({
+      error: 'Method not allowed',
+    });
+  }
 
-  const { session_id, people_id } = req.body || {};
+  const {
+    session_id,
+    people_id,
+  } = req.body || {};
 
   if (!session_id || !people_id) {
     return res.status(400).json({
@@ -22,7 +29,7 @@ export default withOrg(async function handler(req, res) {
   const client = await pool.connect();
 
   try {
-    // Verify that the session belongs to this organization and is active.
+    // Verify that this is an active session owned by this organization.
     const session = await client.query(
       `SELECT id
        FROM sessions
@@ -45,7 +52,7 @@ export default withOrg(async function handler(req, res) {
        FROM people
        WHERE id = $1
          AND organization_id = $2
-         AND status = 'active'
+         AND status != 'deleted'
        LIMIT 1`,
       [people_id, orgId]
     );
@@ -56,12 +63,20 @@ export default withOrg(async function handler(req, res) {
       });
     }
 
-    const today = new Date().toISOString().slice(0, 10);
+    // Use the existing attendance date convention.
+    const today = new Date()
+      .toISOString()
+      .slice(0, 10);
 
     await client.query('BEGIN');
 
+    /*
+     * One attendance record per person per day is preserved.
+     * Marking the same person twice is therefore harmless.
+     */
     await client.query(
-      `INSERT INTO attendance_records (
+      `INSERT INTO attendance_records
+       (
          people_id,
          attendance_date,
          present,
@@ -71,13 +86,19 @@ export default withOrg(async function handler(req, res) {
          confirmed
        )
        VALUES ($1, $2, true, $3, $4, NOW(), false)
-       ON CONFLICT (people_id, attendance_date) DO UPDATE SET
+       ON CONFLICT (people_id, attendance_date)
+       DO UPDATE SET
          present = true,
          session_id = EXCLUDED.session_id,
          marked_by = EXCLUDED.marked_by,
          marked_at = NOW(),
          confirmed = false`,
-      [people_id, today, session_id, userId]
+      [
+        people_id,
+        today,
+        session_id,
+        userId,
+      ]
     );
 
     await client.query('COMMIT');
@@ -85,11 +106,17 @@ export default withOrg(async function handler(req, res) {
     return res.status(200).json({
       success: true,
       people_id,
+      session_id,
     });
   } catch (err) {
-    try { await client.query('ROLLBACK'); } catch {}
+    try {
+      await client.query('ROLLBACK');
+    } catch {}
 
-    console.error('[ATTENDANCE] Mark attendance error:', err);
+    console.error(
+      '[ATTENDANCE] Mark attendance error:',
+      err
+    );
 
     return res.status(500).json({
       error: 'Could not mark attendance.',
