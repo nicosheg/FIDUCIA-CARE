@@ -1,5 +1,5 @@
-// FILE: pages/api/attendance/join-session.js
-// Adds an organization member to an active attendance session.
+// pages/api/attendance/join-session.js
+// Adds an authenticated organization user to an active attendance session.
 
 import pool from '../../../lib/db';
 import { withOrg } from '../../../lib/apiHelpers';
@@ -36,21 +36,6 @@ export default withOrg(async function handler(req, res) {
       });
     }
 
-    const user = await pool.query(
-      `SELECT id
-       FROM users
-       WHERE id = $1
-         AND organization_id = $2
-       LIMIT 1`,
-      [userId, orgId]
-    );
-
-    if (!user.rows.length) {
-      return res.status(403).json({
-        error: 'You do not belong to this organization.',
-      });
-    }
-
     await pool.query(
       `INSERT INTO session_users (session_id,user_id)
        VALUES ($1,$2)
@@ -65,6 +50,7 @@ export default withOrg(async function handler(req, res) {
     });
   } catch (err) {
     console.error('[ATTENDANCE] Join session error:', err);
+
     return res.status(500).json({
       error: 'Could not join attendance.',
     });
