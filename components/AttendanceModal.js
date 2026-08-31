@@ -1,27 +1,33 @@
 // components/AttendanceModal.js
-// FIDUCIA CARE — Live Attendance Modal.
-// Flow: Create → Live global attendance → Leave(discard) / Keep(finalize).
-// Realtime synchronizes attendance_records between all connected ushers.
+// FIDUCIA CARE — Global Live Attendance.
+// Canonical flow: Create → Join → shared live attendance → Admin Keep/Discard.
+// Attendance is server-authoritative; Supabase Realtime synchronizes organization users.
+// Users can mark/unmark and exit. Only owners/admins can Keep or Discard.
+// No duplicate attendance facts: the API/database enforces one person/session record.
 
-import{useCallback,useEffect,useState}from'react';
+import{useCallback,useEffect,useRef,useState}from'react';
 import{createPortal}from'react-dom';
 import{supabase}from'../lib/supabaseClient';
 
 export default function AttendanceModal({isOpen,onClose}){
  const[session,setSession]=useState(null),[people,setPeople]=useState([]),[loading,setLoading]=useState(true),[saving,setSaving]=useState(false),[closing,setClosing]=useState(false),[error,setError]=useState(''),[query,setQuery]=useState(''),[sessionName,setSessionName]=useState('');
+ const channelRef=useRef(null),reconcileTimer=useRef(null),mountedRef=useRef(true);
 
- const auth=async()=>{
+ const auth=useCallback(async()=>{
   const{data:{session}}=await supabase.auth.getSession();
   return session;
- };
+ },[]);
 
+ // Server-authoritative reconciliation.
  const load=useCallback(async()=>{
+  if(!mountedRef.current)return;
   setLoading(true);setError('');
   try{
    const s=await auth();
-   if(!s){setError('You must be logged in.');return}
+   if(!s){setSession(null);setPeople([]);setError('You must be logged in.');return}
    const h={Authorization:`Bearer ${s.access_token}`};
-   const sr=await fetch('/api/attendance/active-session',{headers:h}),sd=await sr.json();
+   const sr=await fetch('/api/attendance/active-session',{headers:h});
+   const sd=await sr.json();
    if(!sr.ok)throw Error(sd.error||'Could not load attendance session.');
 
    if(!sd.active){
@@ -31,59 +37,118 @@ export default function AttendanceModal({isOpen,onClose}){
 
    setSession(sd);
 
-   const pr=await fetch(`/api/attendance/people?session_id=${encodeURIComponent(sd.session_id)}`,{headers:h}),pd=await pr.json();
+   const pr=await fetch(`/api/attendance/people?session_id=${encodeURIComponent(sd.session_id)}`,{headers:h});
+   const pd=await pr.json();
    if(!pr.ok)throw Error(pd.error||'Could not load attendance people.');
    setPeople(Array.isArray(pd)?pd:[]);
   }catch(e){
-   console.error('[ATTENDANCE]',e);
-   setError(e.message||'Could not load attendance.');
-  }finally{setLoading(false)}
+   console.error('[ATTENDANCE] Load error:',e);
+   if(mountedRef.current)setError(e.message||'Could not load attendance.');
+  }finally{
+   if(mountedRef.current)setLoading(false);
+  }
+ },[auth]);
+
+ // Reconcile shortly after a realtime event. This gives us authoritative
+ // marked_by/marked_by_name data instead of trusting incomplete payloads.
+ const scheduleReconcile=useCallback(()=>{
+  clearTimeout(reconcileTimer.current);
+  reconcileTimer.current=setTimeout(()=>load(),250);
+ },[load]);
+
+ useEffect(()=>{
+  mountedRef.current=true;
+  return()=>{mountedRef.current=false;clearTimeout(reconcileTimer.current)};
  },[]);
 
  useEffect(()=>{if(isOpen)load()},[isOpen,load]);
 
- // Global live synchronization: every usher sees the same attendance state.
+ // GLOBAL ORGANIZATION-WIDE LIVE SYNCHRONIZATION.
+ // Every connected client subscribes to the same session's attendance records.
  useEffect(()=>{
   if(!isOpen||!session?.session_id)return;
 
-  const channel=supabase
-   .channel(`attendance-live-${session.session_id}`)
-   .on(
-    'postgres_changes',
-    {
-     event:'*',
-     schema:'public',
-     table:'attendance_records',
-     filter:`session_id=eq.${session.session_id}`
-    },
-    payload=>{
-     const row=payload.new||payload.old;
-     if(!row?.people_id)return;
+  const sid=session.session_id;
+  const channel=supabase.channel(`attendance-live-${sid}`);
 
-     if(payload.eventType==='DELETE'){
-      setPeople(current=>current.map(p=>
-       p.id===row.people_id?{...p,marked:false,marked_by_name:null}:p
-      ));
-      return;
-     }
+  channel
+   .on('postgres_changes',{
+    event:'*',
+    schema:'public',
+    table:'attendance_records',
+    filter:`session_id=eq.${sid}`
+   },payload=>{
+    const row=payload.new||payload.old;
+    if(!row?.people_id)return;
 
-     if(payload.eventType==='INSERT'||payload.eventType==='UPDATE'){
-      setPeople(current=>current.map(p=>
-       p.id===row.people_id
-        ?{...p,marked:row.present===true,marked_by_name:p.marked_by_name}
-        :p
-      ));
+    // Apply the database event immediately for responsive UI.
+    if(payload.eventType==='DELETE'){
+     setPeople(current=>current.map(p=>
+      p.id===row.people_id
+       ?{...p,marked:false,marked_by_name:null}
+       :p
+     ));
+    }else if(payload.eventType==='INSERT'||payload.eventType==='UPDATE'){
+     setPeople(current=>current.map(p=>
+      p.id===row.people_id
+       ?{
+          ...p,
+          marked:row.present===true,
+          marked_by_name:
+           row.marked_by&&row.marked_by===session.user_id
+            ?'You'
+            :p.marked_by_name
+        }
+       :p
+     ));
+    }
+
+    // Then reconcile against the authoritative API.
+    scheduleReconcile();
+   })
+   .on('postgres_changes',{
+    event:'*',
+    schema:'public',
+    table:'sessions',
+    filter:`id=eq.${sid}`
+   },payload=>{
+    // Session was closed/discarded elsewhere.
+    const row=payload.new||payload.old;
+    if(payload.eventType==='DELETE'){
+     setSession(null);setPeople([]);setQuery('');
+     scheduleReconcile();
+     return;
+    }
+    if(payload.eventType==='UPDATE'){
+     if(row.status!=='active'){
+      setSession(null);setPeople([]);setQuery('');
+     }else{
+      scheduleReconcile();
      }
     }
-   )
+   })
    .subscribe(status=>{
-    if(status==='CHANNEL_ERROR')console.error('[ATTENDANCE] Realtime channel error');
+    if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')
+     console.error('[ATTENDANCE] Realtime channel:',status);
    });
 
-  return()=>{supabase.removeChannel(channel)};
- },[isOpen,session?.session_id]);
+  channelRef.current=channel;
 
- // Create a new attendance session.
+  return()=>{
+   clearTimeout(reconcileTimer.current);
+   if(channelRef.current===channel)channelRef.current=null;
+   supabase.removeChannel(channel);
+  };
+ },[isOpen,session?.session_id,session?.user_id,scheduleReconcile]);
+
+ // Safety reconciliation: if a client misses a Realtime event,
+ // the UI still converges to the server's truth.
+ useEffect(()=>{
+  if(!isOpen||!session?.session_id)return;
+  const timer=setInterval(()=>load(),7000);
+  return()=>clearInterval(timer);
+ },[isOpen,session?.session_id,load]);
+
  const createSession=async()=>{
   const name=sessionName.trim();
   if(!name){setError('Enter a name for this attendance session.');return}
@@ -108,19 +173,19 @@ export default function AttendanceModal({isOpen,onClose}){
   }finally{setSaving(false)}
  };
 
- // Mark/unmark instantly, then let the server + Realtime confirm the state.
+ // Mark/unmark is optimistic for instant response, but the server remains
+ // authoritative. A failure triggers a complete reconciliation.
  const mark=async(id,currentMarked)=>{
-  if(!session||saving)return;
+  if(!session||closing)return;
 
   const previous=people;
   const next=!currentMarked;
 
-  // Instant local response.
-  setPeople(p=>p.map(x=>x.id===id
-   ?{...x,marked:next,marked_by_name:next?'You':null}
-   :x
+  setPeople(current=>current.map(p=>
+   p.id===id
+    ?{...p,marked:next,marked_by_name:next?'You':null}
+    :p
   ));
-
   setError('');
 
   try{
@@ -136,21 +201,23 @@ export default function AttendanceModal({isOpen,onClose}){
      present:next
     })
    });
-
    const d=await r.json();
    if(!r.ok||!d.success)throw Error(d.error||'Could not update attendance.');
 
-   // Do not reload: Realtime handles global synchronization.
+   // Do not blindly overwrite the UI here.
+   // Realtime + reconciliation will establish the final shared state.
+   scheduleReconcile();
   }catch(e){
    console.error('[ATTENDANCE] Mark/unmark error:',e);
    setPeople(previous);
    setError(e.message||'Could not update attendance.');
+   scheduleReconcile();
   }
  };
 
- // Finalize and keep the session.
+ // Only owners/admins may finalize a session.
  const keepSession=async()=>{
-  if(!session||closing)return;
+  if(!session||closing||!session.can_manage)return;
   setClosing(true);setError('');
 
   try{
@@ -162,24 +229,22 @@ export default function AttendanceModal({isOpen,onClose}){
     headers:{'Content-Type':'application/json',Authorization:`Bearer ${s.access_token}`},
     body:JSON.stringify({session_id:session.session_id})
    });
-
    const d=await r.json();
    if(!r.ok||!d.success)throw Error(d.error||'Could not keep this session.');
 
-   // Immediately return to Create Session state.
    setSession(null);setPeople([]);setQuery('');
   }catch(e){
-   console.error('[ATTENDANCE] Keep session error:',e);
+   console.error('[ATTENDANCE] Keep error:',e);
    setError(e.message||'Could not keep this session.');
   }finally{setClosing(false)}
  };
 
- // Leave = reverse/discard the active session.
+ // Only owners/admins may discard an active session.
  const leaveSession=async()=>{
-  if(!session||closing)return;
+  if(!session||closing||!session.can_manage)return;
 
   const confirmed=window.confirm(
-   'Leave this attendance session?\n\nThis will discard the live session and its attendance marks. This cannot be undone.'
+   'Discard this attendance session?\n\nAll live attendance marks in this session will be removed. This cannot be undone.'
   );
   if(!confirmed)return;
 
@@ -194,20 +259,19 @@ export default function AttendanceModal({isOpen,onClose}){
     headers:{'Content-Type':'application/json',Authorization:`Bearer ${s.access_token}`},
     body:JSON.stringify({session_id:session.session_id})
    });
-
    const d=await r.json();
-   if(!r.ok||!d.success)throw Error(d.error||'Could not leave this session.');
+   if(!r.ok||!d.success)throw Error(d.error||'Could not discard this session.');
 
    setSession(null);setPeople([]);setQuery('');
   }catch(e){
-   console.error('[ATTENDANCE] Leave error:',e);
-   setError(e.message||'Could not leave this session.');
+   console.error('[ATTENDANCE] Discard error:',e);
+   setError(e.message||'Could not discard this session.');
   }finally{setClosing(false)}
  };
 
  useEffect(()=>{
   if(!isOpen)return;
-  const esc=e=>e.key==='Escape'&&onClose();
+  const esc=e=>{if(e.key==='Escape')onClose()};
   document.addEventListener('keydown',esc);
   return()=>document.removeEventListener('keydown',esc);
  },[isOpen,onClose]);
@@ -221,6 +285,7 @@ export default function AttendanceModal({isOpen,onClose}){
  );
  const present=people.filter(p=>p.marked).length;
  const percentage=people.length?Math.round(present/people.length*100):0;
+ const canManage=!!session?.can_manage||['owner','admin'].includes(session?.role);
 
  const content=<div className="attendance-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
   <div className="attendance-modal" role="dialog" aria-modal="true" aria-label="Live attendance">
@@ -258,6 +323,7 @@ export default function AttendanceModal({isOpen,onClose}){
       <div className="main-stat"><strong>{present}</strong><span>present</span></div>
       <div className="stat-divider"/>
       <div className="small-stat"><strong>{people.length}</strong><span>people</span></div>
+      <div className="stat-divider"/>
       <div className="small-stat"><strong>{percentage}%</strong><span>marked</span></div>
       <div className="progress-wrap"><div className="progress"><div className="progress-fill" style={{width:`${percentage}%`}}/></div></div>
      </div>
@@ -297,8 +363,10 @@ export default function AttendanceModal({isOpen,onClose}){
      <footer>
       <div className="live"><span className="live-dot"/>Live attendance</div>
       <div className="footer-actions">
-       <button className="leave-button" disabled={closing} onClick={leaveSession}>Leave</button>
-       <button className="keep-button" disabled={closing} onClick={keepSession}>{closing?'Saving...':'Keep session'}</button>
+       {canManage?<>
+        <button className="leave-button" disabled={closing} onClick={leaveSession}>Discard</button>
+        <button className="keep-button" disabled={closing} onClick={keepSession}>{closing?'Saving...':'Keep session'}</button>
+       </>:<button className="done-button" disabled={closing} onClick={onClose}>Done</button>}
       </div>
      </footer>
     </>
@@ -317,14 +385,6 @@ export default function AttendanceModal({isOpen,onClose}){
    .hero-stats{padding:17px 28px 15px;display:flex;align-items:center;gap:22px;flex-shrink:0}.main-stat{display:flex;align-items:baseline;gap:7px}.main-stat strong{font-size:31px}.main-stat span,.small-stat span{color:rgba(255,255,255,.46);font-size:12px}.stat-divider{width:1px;height:29px;background:rgba(255,255,255,.11)}.small-stat{display:flex;align-items:baseline;gap:5px}.small-stat strong{font-size:19px}.progress-wrap{flex:1;min-width:70px}.progress{width:100%;height:5px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden}.progress-fill{height:100%;background:#d4af37;border-radius:99px;transition:width .35s}
    .toolbar{padding:0 28px 13px;flex-shrink:0}.search-wrap{position:relative}.search{width:100%;box-sizing:border-box;padding:13px 42px;border-radius:15px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.065);color:#fff;font-size:14px;outline:none}.search::placeholder{color:rgba(255,255,255,.34)}.search-icon{position:absolute;left:16px;top:50%;transform:translateY(-51%);color:rgba(255,255,255,.4);font-size:20px}.clear-search{position:absolute;right:9px;top:50%;transform:translateY(-50%);width:28px;height:28px;border:0;border-radius:50%;background:rgba(255,255,255,.09);color:rgba(255,255,255,.7);cursor:pointer;font-size:18px}
    .people{flex:1;min-height:0;overflow:auto;padding:0 28px 15px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start;gap:8px}.person{min-height:64px;box-sizing:border-box;padding:9px 10px;border:1px solid rgba(255,255,255,.08);border-radius:16px;background:rgba(255,255,255,.045);display:flex;align-items:center;justify-content:space-between;gap:9px}.person.marked{background:rgba(76,175,80,.09);border-color:rgba(76,175,80,.27)}.person-info{min-width:0;display:flex;align-items:center;gap:10px}.avatar{width:38px;height:38px;flex:0 0 38px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.09);color:rgba(255,255,255,.75);font-size:14px;font-weight:750}.present-avatar{background:rgba(76,175,80,.19);color:#b7e8b9}.person-copy{min-width:0}.person strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.person small{display:block;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgba(255,255,255,.38);font-size:11px}.person.marked small{color:rgba(160,220,165,.65)}
-   .mark-button{flex-shrink:0;border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:8px 11px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.87);font-size:11px;font-weight:650;cursor:pointer;white-space:nowrap}.mark-button:hover:not(:disabled){background:rgba(212,175,55,.16);border-color:rgba(212,175,55,.32);color:#f4d77a}.mark-button.done{background:rgba(76,175,80,.14);border-color:rgba(76,175,80,.22);color:#a9dcae}
-   footer{flex-shrink:0;min-height:58px;box-sizing:border-box;padding:9px 28px;border-top:1px solid rgba(255,255,255,.075);display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:11px}.live{display:flex;align-items:center;gap:7px}.live-dot{width:7px;height:7px;border-radius:50%;background:#6bd174;box-shadow:0 0 0 4px rgba(107,209,116,.08)}.footer-actions{display:flex;gap:8px}.leave-button,.keep-button{border-radius:999px;padding:9px 17px;font-size:11px;font-weight:700;cursor:pointer}.leave-button{border:1px solid rgba(239,68,68,.25);background:rgba(239,68,68,.08);color:#ffaaa5}.keep-button{border:1px solid rgba(212,175,55,.35);background:rgba(212,175,55,.14);color:#f4d77a}.leave-button:disabled,.keep-button:disabled{opacity:.5;cursor:default}
+   .mark-button,.done-button{flex-shrink:0;border-radius:999px;padding:8px 11px;font-size:11px;font-weight:650;cursor:pointer;white-space:nowrap}.mark-button{border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.08);color:rgba(255,255,255,.87)}.mark-button:hover:not(:disabled){background:rgba(212,175,55,.16);border-color:rgba(212,175,55,.32);color:#f4d77a}.mark-button.done{background:rgba(76,175,80,.14);border-color:rgba(76,175,80,.22);color:#a9dcae}
+   footer{flex-shrink:0;min-height:58px;box-sizing:border-box;padding:9px 28px;border-top:1px solid rgba(255,255,255,.075);display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.38);font-size:11px}.live{display:flex;align-items:center;gap:7px}.live-dot{width:7px;height:7px;border-radius:50%;background:#6bd174;box-shadow:0 0 0 4px rgba(107,209,116,.08)}.footer-actions{display:flex;gap:8px}.leave-button,.keep-button,.done-button{border-radius:999px;padding:9px 17px;font-size:11px;font-weight:700;cursor:pointer}.leave-button{border:1px solid rgba(239,68,68,.25);background:rgba(239,68,68,.08);color:#ffaaa5}.keep-button{border:1px solid rgba(212,175,55,.35);background:rgba(212,175,55,.14);color:#f4d77a}.done-button{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:rgba(255,255,255,.8)}.leave-button:disabled,.keep-button:disabled,.done-button:disabled,.mark-button:disabled{opacity:.5;cursor:default}
    .loading,.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:rgba(255,255,255,.38);font-size:12px}.empty{grid-column:1/-1;min-height:220px}.empty strong{color:rgba(255,255,255,.62);font-size:14px}.empty span{max-width:300px;text-align:center;line-height:1.5}.empty-icon,.create-icon{width:43px;height:43px;border-radius:14px;background:rgba(255,255,255,.055);display:flex;align-items:center;justify-content:center;font-size:21px;color:rgba(255,255,255,.35)}.loader{width:22px;height:22px;border:2px solid rgba(255,255,255,.1);border-top-color:rgba(212,175,55,.85);border-radius:50%;animation:spin .75s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-   .create-session{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:30px}.create-session strong{font-size:20px}.create-session>span{max-width:390px;text-align:center;color:rgba(255,255,255,.42);font-size:13px;line-height:1.5}.create-session input{width:min(390px,90%);box-sizing:border-box;margin-top:8px;padding:14px 16px;border-radius:15px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.065);color:#fff;outline:none;font-size:14px}.create-session input:focus{border-color:rgba(212,175,55,.45)}.create-session input::placeholder{color:rgba(255,255,255,.32)}.create-button{width:min(390px,90%);padding:13px 18px;border:1px solid rgba(212,175,55,.35);border-radius:15px;background:rgba(212,175,55,.14);color:#f4d77a;font-weight:700;cursor:pointer}.create-button:disabled{opacity:.4;cursor:default}
-   @media(max-width:720px){.attendance-overlay{padding:92px 9px 15px}.attendance-modal{width:97vw;height:78vh;min-height:500px;border-radius:24px}header{padding:19px}.hero-stats{padding:14px 19px 12px;gap:14px}.toolbar{padding:0 19px 11px}.people{padding:0 19px 12px;grid-template-columns:1fr;gap:7px}footer{padding:9px 19px}.footer-actions{gap:6px}.leave-button,.keep-button{padding:8px 13px}}
-   @media(max-width:480px){.attendance-overlay{padding:82px 6px 8px}.attendance-modal{width:98vw;height:82vh;min-height:480px;border-radius:22px}.attendance-modal header{padding:17px}.attendance-modal header p{font-size:12px}.hero-stats{padding:12px 17px 10px;gap:11px}.main-stat strong{font-size:27px}.small-stat strong{font-size:17px}.progress-wrap{min-width:50px}.toolbar{padding:0 17px 10px}.people{padding-left:17px;padding-right:17px}.person{min-height:60px;padding:8px}.avatar{width:35px;height:35px;flex-basis:35px}.mark-button{padding:7px 9px;font-size:10px}footer{padding-left:17px;padding-right:17px}.create-session{padding:20px}.create-session input,.create-button{width:100%}}
-  `}</style>
- </div>;
-
- return typeof document!=='undefined'?createPortal(content,document.body):null;
-        }
