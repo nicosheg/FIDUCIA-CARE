@@ -1,5 +1,6 @@
-// FILE: pages/api/attendance/create-session.js
-// Creates one organization-scoped active session, its sections, creator membership, and group assignments.
+// pages/api/attendance/create-session.js
+// Creates one organization-scoped active session, its sections, and creator membership.
+// IMPORTANT: session_sections is the canonical section table. Do NOT use attendance_groups.
 
 import pool from '../../../lib/db';
 import { withOrg } from '../../../lib/apiHelpers';
@@ -11,15 +12,19 @@ export default withOrg(async function handler(req, res) {
   }
 
   const { name, sections } = req.body || {};
+
   if (typeof name !== 'string' || !name.trim()) {
     return res.status(400).json({ error: 'Event name is required.' });
   }
 
-  const requestedSections = Array.isArray(sections)
+  // Normalize sections: unique, non-empty strings.
+  const normalizedSections = Array.isArray(sections)
     ? [...new Set(sections.filter(s => typeof s === 'string').map(s => s.trim()).filter(Boolean))]
-    : ['All'];
+    : [];
 
-  const finalSections = requestedSections.length ? requestedSections : ['All'];
+  // Every session must have at least the default "All" section.
+  if (!normalizedSections.length) normalizedSections.push('All');
+
   const orgId = req.org.id;
   const userId = req.user.id;
   const client = await pool.connect();
@@ -27,7 +32,7 @@ export default withOrg(async function handler(req, res) {
   try {
     await client.query('BEGIN');
 
-    // Enforce one active attendance session per organization.
+    // Defense-in-depth: only one active session per organization.
     const existing = await client.query(
       `SELECT id,name,started_by,started_at
        FROM sessions
@@ -46,6 +51,7 @@ export default withOrg(async function handler(req, res) {
       });
     }
 
+    // Create the session.
     const created = await client.query(
       `INSERT INTO sessions (organization_id,name,status,started_by,started_at)
        VALUES ($1,$2,'active',$3,NOW())
@@ -63,8 +69,9 @@ export default withOrg(async function handler(req, res) {
       [session.id, userId]
     );
 
-    // Create the sections requested by the session creator.
-    for (const sectionName of finalSections) {
+    // Create the requested sections.
+    // organization_id is required and must match the session organization.
+    for (const sectionName of normalizedSections) {
       await client.query(
         `INSERT INTO session_sections (session_id,name,organization_id)
          VALUES ($1,$2,$3)
@@ -73,37 +80,32 @@ export default withOrg(async function handler(req, res) {
       );
     }
 
-    // Preserve existing attendance-group functionality.
-    const groups = await client.query(
-      `SELECT id
-       FROM attendance_groups
-       WHERE organization_id = $1
-       ORDER BY sort_order`,
-      [orgId]
-    );
-
-    for (const group of groups.rows) {
-      await client.query(
-        `INSERT INTO session_groups (session_id,group_id)
-         VALUES ($1,$2)
-         ON CONFLICT DO NOTHING`,
-        [session.id, group.id]
-      );
-    }
-
     await client.query('COMMIT');
 
+    // Return both shapes for frontend compatibility:
+    // data.id and data.session.id are both valid.
     return res.status(201).json({
       success: true,
       id: session.id,
       session,
-      sections: finalSections,
+      sections: normalizedSections,
       joined: true,
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
+
+    // If another request won the race to create an active session,
+    // surface a clean conflict instead of a generic 500.
+    if (err.code === '23505') {
+      return res.status(409).json({
+        error: 'An attendance session is already active.',
+      });
+    }
+
     console.error('[ATTENDANCE] Create session error:', err);
-    return res.status(500).json({ error: 'Could not start attendance.' });
+    return res.status(500).json({
+      error: 'Could not start attendance.',
+    });
   } finally {
     client.release();
   }
