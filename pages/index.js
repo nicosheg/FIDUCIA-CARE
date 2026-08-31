@@ -1,8 +1,7 @@
 // pages/index.js — ARIA Today
-// FIDUCIA CARE — Homepage / ARIA Today
-// Flow: People → Create Session → Active Attendance
-// IMPORTANT: Never auto-create an attendance session.
-// If no session exists, STARTING sends the user to /session.
+// FIDUCIA CARE — Homepage
+// Attendance entry is unified: Attendance opens setup when no session exists,
+// and opens live attendance when an active session already exists.
 
 import{useEffect,useState}from'react';
 import{useRouter}from'next/router';
@@ -103,17 +102,9 @@ export default function ARIAHome(){
       {data.nextActionType==='SCAN'&&
        <ToolButton onClick={()=>setTool('scan')} primary>Scan Register</ToolButton>}
 
-      {/* STARTING = people exist but no session yet. Create one; never auto-create. */}
+      {/* Attendance is one connected experience. Setup/live state is handled inside the modal. */}
       {data.nextActionType==='ATTENDANCE'&&
-       <ToolButton
-        onClick={()=>{
-         if(data.state==='STARTING')router.push('/session');
-         else setTool('attendance');
-        }}
-        primary
-       >
-        {data.state==='STARTING'?'Create Session':'Record Attendance'}
-       </ToolButton>}
+       <ToolButton onClick={()=>setTool('attendance')} primary>Attendance</ToolButton>}
 
       {data.nextActionType==='REVIEW'&&
        <ToolButton onClick={()=>setTool('review')} primary>Review</ToolButton>}
@@ -147,7 +138,6 @@ export default function ARIAHome(){
     <div style={{textAlign:'center',marginTop:70,color:'rgba(255,255,255,.22)',fontSize:14,letterSpacing:'.03em'}}>Every Person. Every Story. Remembered.</div>
    </main>
 
-   {/* Homepage tools — attendance only opens directly when a session already exists. */}
    {tool==='scan'&&<ScanModal isOpen onClose={()=>setTool(null)}/>}
    {tool==='attendance'&&<AttendanceModal isOpen onClose={()=>setTool(null)}/>}
    {tool==='review'&&
