@@ -102,4 +102,4 @@ export default function AttendanceModal({isOpen,onClose}){
    @media(max-width:600px){.attendance-overlay{padding:8px}.attendance-modal{width:100%;height:96vh;border-radius:24px}header{padding:20px}.stats{padding:13px 20px}.search{margin-left:20px;margin-right:20px;width:calc(100% - 40px)}.people{padding:0 20px 20px;grid-template-columns:1fr;gap:8px}.person{min-height:60px}.attendance-modal h2{font-size:30px}.attendance-modal p{font-size:15px}}
   `}</style>
  </div>
-    }
+  }
