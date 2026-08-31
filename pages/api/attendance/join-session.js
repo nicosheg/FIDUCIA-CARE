@@ -1,4 +1,5 @@
-// pages/api/attendance/join-session.js
+// FILE: pages/api/attendance/join-session.js
+// Adds an organization member to an active attendance session.
 
 import pool from '../../../lib/db';
 import { withOrg } from '../../../lib/apiHelpers';
@@ -6,17 +7,13 @@ import { withOrg } from '../../../lib/apiHelpers';
 export default withOrg(async function handler(req, res) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
-    return res.status(405).json({
-      error: 'Method not allowed',
-    });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { session_id } = req.body || {};
 
   if (!session_id) {
-    return res.status(400).json({
-      error: 'session_id is required.',
-    });
+    return res.status(400).json({ error: 'session_id is required.' });
   }
 
   const orgId = req.org.id;
@@ -24,17 +21,12 @@ export default withOrg(async function handler(req, res) {
 
   try {
     const session = await pool.query(
-      `
-      SELECT
-        id,
-        name,
-        status
-      FROM sessions
-      WHERE id = $1
-        AND organization_id = $2
-        AND status = 'active'
-      LIMIT 1
-      `,
+      `SELECT id,name,status
+       FROM sessions
+       WHERE id = $1
+         AND organization_id = $2
+         AND status = 'active'
+       LIMIT 1`,
       [session_id, orgId]
     );
 
@@ -44,15 +36,25 @@ export default withOrg(async function handler(req, res) {
       });
     }
 
+    const user = await pool.query(
+      `SELECT id
+       FROM users
+       WHERE id = $1
+         AND organization_id = $2
+       LIMIT 1`,
+      [userId, orgId]
+    );
+
+    if (!user.rows.length) {
+      return res.status(403).json({
+        error: 'You do not belong to this organization.',
+      });
+    }
+
     await pool.query(
-      `
-      INSERT INTO session_users (
-        session_id,
-        user_id
-      )
-      VALUES ($1, $2)
-      ON CONFLICT DO NOTHING
-      `,
+      `INSERT INTO session_users (session_id,user_id)
+       VALUES ($1,$2)
+       ON CONFLICT DO NOTHING`,
       [session_id, userId]
     );
 
@@ -61,13 +63,8 @@ export default withOrg(async function handler(req, res) {
       joined: true,
       session: session.rows[0],
     });
-
   } catch (err) {
-    console.error(
-      '[ATTENDANCE] Join session error:',
-      err
-    );
-
+    console.error('[ATTENDANCE] Join session error:', err);
     return res.status(500).json({
       error: 'Could not join attendance.',
     });
