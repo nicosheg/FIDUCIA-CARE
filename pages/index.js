@@ -1,4 +1,9 @@
 // pages/index.js — ARIA Today
+// FIDUCIA CARE — Homepage / ARIA Today
+// Flow: People → Create Session → Active Attendance
+// IMPORTANT: Never auto-create an attendance session.
+// If no session exists, STARTING sends the user to /session.
+
 import{useEffect,useState}from'react';
 import{useRouter}from'next/router';
 import{supabase}from'../lib/supabaseClient';
@@ -56,9 +61,7 @@ export default function ARIAHome(){
    <main style={{maxWidth:900,margin:'0 auto',padding:'42px 20px 100px'}}>
     <div style={{marginBottom:34}}>
      <div style={{fontSize:13,letterSpacing:2,textTransform:'uppercase',color:'rgba(255,255,255,.4)',marginBottom:14}}>ARIA Today</div>
-     <h1 style={{fontSize:'clamp(34px,7vw,58px)',lineHeight:1.08,letterSpacing:'-.035em',fontWeight:600,color:'#f7f7f7',maxWidth:760,margin:0}}>
-      {data.summary}
-     </h1>
+     <h1 style={{fontSize:'clamp(34px,7vw,58px)',lineHeight:1.08,letterSpacing:'-.035em',fontWeight:600,color:'#f7f7f7',maxWidth:760,margin:0}}>{data.summary}</h1>
     </div>
 
     <p style={{fontSize:18,lineHeight:1.65,color:'rgba(255,255,255,.58)',maxWidth:720,margin:'0 0 34px'}}>
@@ -95,15 +98,22 @@ export default function ARIAHome(){
         :'Nothing needs your attention right now.'}
       </div>
 
-      <p style={{margin:'0 0 22px',fontSize:16,lineHeight:1.6,color:'rgba(255,255,255,.55)'}}>
-       {data.nextAction}
-      </p>
+      <p style={{margin:'0 0 22px',fontSize:16,lineHeight:1.6,color:'rgba(255,255,255,.55)'}}>{data.nextAction}</p>
 
       {data.nextActionType==='SCAN'&&
        <ToolButton onClick={()=>setTool('scan')} primary>Scan Register</ToolButton>}
 
+      {/* STARTING = people exist but no session yet. Create one; never auto-create. */}
       {data.nextActionType==='ATTENDANCE'&&
-       <ToolButton onClick={()=>setTool('attendance')} primary>Record Attendance</ToolButton>}
+       <ToolButton
+        onClick={()=>{
+         if(data.state==='STARTING')router.push('/session');
+         else setTool('attendance');
+        }}
+        primary
+       >
+        {data.state==='STARTING'?'Create Session':'Record Attendance'}
+       </ToolButton>}
 
       {data.nextActionType==='REVIEW'&&
        <ToolButton onClick={()=>setTool('review')} primary>Review</ToolButton>}
@@ -113,16 +123,11 @@ export default function ARIAHome(){
     {hasPattern&&(
      <section style={{marginBottom:42}}>
       <h2 style={{fontSize:22,fontWeight:550,color:'#f0f0f0',marginBottom:14}}>A pattern ARIA noticed</h2>
-
       {data.patterns.slice(0,3).map(p=>(
        <div key={p.id} className="fiducia-card" style={{padding:'18px 20px',marginBottom:8,borderRadius:22}}>
         <div style={{color:'#f2f2f2',fontWeight:500}}>{p.first_name} {p.last_name||''}</div>
-        <div style={{color:'rgba(255,255,255,.5)',marginTop:5,lineHeight:1.5}}>
-         Attended {p.previous_attendance} of the previous 3 sessions, but was not present in the latest session.
-        </div>
-        <div style={{color:'rgba(255,255,255,.32)',fontSize:12,marginTop:8}}>
-         PATTERN · not a prediction of what will happen
-        </div>
+        <div style={{color:'rgba(255,255,255,.5)',marginTop:5,lineHeight:1.5}}>Attended {p.previous_attendance} of the previous 3 sessions, but was not present in the latest session.</div>
+        <div style={{color:'rgba(255,255,255,.32)',fontSize:12,marginTop:8}}>PATTERN · not a prediction of what will happen</div>
        </div>
       ))}
      </section>
@@ -131,10 +136,7 @@ export default function ARIAHome(){
     <CareQueueList/>
 
     <section style={{marginTop:42,paddingTop:26,borderTop:'1px solid rgba(255,255,255,.07)'}}>
-     <div style={{fontSize:13,letterSpacing:1.5,textTransform:'uppercase',color:'rgba(255,255,255,.3)',marginBottom:14}}>
-      Tools
-     </div>
-
+     <div style={{fontSize:13,letterSpacing:1.5,textTransform:'uppercase',color:'rgba(255,255,255,.3)',marginBottom:14}}>Tools</div>
      <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
       <ToolButton onClick={()=>setTool('scan')}>Scan Register</ToolButton>
       <ToolButton onClick={()=>setTool('attendance')}>Attendance</ToolButton>
@@ -142,30 +144,20 @@ export default function ARIAHome(){
      </div>
     </section>
 
-    <div style={{textAlign:'center',marginTop:70,color:'rgba(255,255,255,.22)',fontSize:14,letterSpacing:'.03em'}}>
-     Every Person. Every Story. Remembered.
-    </div>
+    <div style={{textAlign:'center',marginTop:70,color:'rgba(255,255,255,.22)',fontSize:14,letterSpacing:'.03em'}}>Every Person. Every Story. Remembered.</div>
    </main>
 
-   {/* Homepage tools */}
-   {tool==='scan'&&(
-    <ScanModal isOpen onClose={()=>setTool(null)}/>
-   )}
-
-   {/* Attendance stays entirely inside the homepage modal. */}
-   {tool==='attendance'&&(
-    <AttendanceModal isOpen onClose={()=>setTool(null)}/>
-   )}
-
-   {tool==='review'&&(
+   {/* Homepage tools — attendance only opens directly when a session already exists. */}
+   {tool==='scan'&&<ScanModal isOpen onClose={()=>setTool(null)}/>}
+   {tool==='attendance'&&<AttendanceModal isOpen onClose={()=>setTool(null)}/>}
+   {tool==='review'&&
     <ActionModal
      title="Review"
      text="Review people, signals and suggested care actions before deciding what to do."
      button="Open Review"
      onClose={()=>setTool(null)}
      onAction={()=>router.push('/people?tab=review')}
-    />
-   )}
+    />}
   </Layout>
  );
 }
@@ -173,9 +165,7 @@ export default function ARIAHome(){
 function Stat({label,value}){
  return(
   <div className="fiducia-card" style={{padding:'18px 20px',borderRadius:24}}>
-   <div style={{fontSize:12,letterSpacing:1.2,textTransform:'uppercase',color:'rgba(255,255,255,.4)',marginBottom:8}}>
-    {label}
-   </div>
+   <div style={{fontSize:12,letterSpacing:1.2,textTransform:'uppercase',color:'rgba(255,255,255,.4)',marginBottom:8}}>{label}</div>
    <div style={{fontSize:32,fontWeight:600,color:'#f5f5f5'}}>{value}</div>
   </div>
  );
@@ -183,11 +173,7 @@ function Stat({label,value}){
 
 function ToolButton({children,onClick,primary=false}){
  return(
-  <button
-   onClick={onClick}
-   className={primary?'fiducia-button fiducia-button-primary':'fiducia-button fiducia-button-ghost'}
-   style={{borderRadius:999}}
-  >
+  <button onClick={onClick} className={primary?'fiducia-button fiducia-button-primary':'fiducia-button fiducia-button-ghost'} style={{borderRadius:999}}>
    {children}
   </button>
  );
@@ -195,11 +181,7 @@ function ToolButton({children,onClick,primary=false}){
 
 function ActionModal({title,text,button,onClose,onAction}){
  return(
-  <div style={{
-   position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,.65)',
-   backdropFilter:'blur(14px)',display:'flex',alignItems:'center',
-   justifyContent:'center',padding:20
-  }}>
+  <div style={{position:'fixed',inset:0,zIndex:1000,background:'rgba(0,0,0,.65)',backdropFilter:'blur(14px)',display:'flex',alignItems:'center',justifyContent:'center',padding:20}}>
    <div className="fiducia-card" style={{width:'100%',maxWidth:480,padding:28,borderRadius:30}}>
     <h2 style={{margin:'0 0 10px',color:'#f5f5f5'}}>{title}</h2>
     <p style={{color:'rgba(255,255,255,.55)',lineHeight:1.6,margin:'0 0 24px'}}>{text}</p>
@@ -210,4 +192,4 @@ function ActionModal({title,text,button,onClose,onAction}){
    </div>
   </div>
  );
-                                                 }
+}
