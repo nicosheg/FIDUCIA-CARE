@@ -1,6 +1,5 @@
 // pages/api/attendance/leave-session.js
-// FIDUCIA CARE — Owner/admin-only discard of an active attendance session.
-// Users cannot discard organizational attendance records.
+// FIDUCIA CARE — Admin/Owner-only active-session discard endpoint.
 
 import pool from '../../../lib/db';
 import { withAdmin } from '../../../lib/apiHelpers';
@@ -14,13 +13,13 @@ export default withAdmin(async function handler(req,res){
  const{session_id}=req.body||{};
  if(!session_id)return res.status(400).json({error:'session_id is required.'});
 
- const orgId=req.org.id,client=await pool.connect();
+ const orgId=req.org.id,userId=req.user.id,client=await pool.connect();
 
  try{
   await client.query('BEGIN');
 
   const session=await client.query(
-   `SELECT id,name,started_by,status
+   `SELECT id,name,status
     FROM sessions
     WHERE id=$1 AND organization_id=$2
     LIMIT 1
@@ -35,32 +34,11 @@ export default withAdmin(async function handler(req,res){
 
   if(session.rows[0].status!=='active'){
    await client.query('ROLLBACK');
-   return res.status(409).json({error:'This attendance session is already closed.'});
+   return res.status(409).json({error:'This attendance session is no longer active.'});
   }
 
-  // Only owners/admins reach this endpoint through withAdmin.
-  // The authenticated admin/owner is responsible for the discard.
   await client.query(
    `DELETE FROM attendance_records
-    WHERE organization_id=$1 AND session_id=$2`,
-   [orgId,session_id]
-  );
-
-  // Remove dependent session ownership records first.
-  await client.query(
-   `DELETE FROM session_group_owners
-    WHERE organization_id=$1 AND session_id=$2`,
-   [orgId,session_id]
-  );
-
-  await client.query(
-   `DELETE FROM session_groups
-    WHERE session_id=$1`,
-   [session_id]
-  );
-
-  await client.query(
-   `DELETE FROM session_sections
     WHERE organization_id=$1 AND session_id=$2`,
    [orgId,session_id]
   );
@@ -71,11 +49,10 @@ export default withAdmin(async function handler(req,res){
    [session_id]
   );
 
-  await client.query(
+  const deleted=await client.query(
    `DELETE FROM sessions
-    WHERE id=$1
-      AND organization_id=$2
-      AND status='active'`,
+    WHERE id=$1 AND organization_id=$2 AND status='active'
+    RETURNING id,name`,
    [session_id,orgId]
   );
 
@@ -84,7 +61,8 @@ export default withAdmin(async function handler(req,res){
   return res.status(200).json({
    success:true,
    discarded:true,
-   session_id,
+   session:deleted.rows[0],
+   discarded_by:userId
   });
  }catch(err){
   try{await client.query('ROLLBACK')}catch{}
