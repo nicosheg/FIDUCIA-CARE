@@ -2,145 +2,150 @@
 import {useEffect,useState} from 'react';
 import {useRouter} from 'next/router';
 import Layout from '../components/Layout';
+import FirstExperience from '../components/FirstExperience';
+import {useOnboarding} from '../components/OnboardingProvider';
 import {supabase} from '../lib/supabaseClient';
+
+const roleLabel=r=>r==='owner'?'Owner':r==='admin'?'Admin':'User';
+const initials=n=>(n||'?').trim().split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase();
 
 export default function ProfilePage(){
   const router=useRouter();
-  const [profile,setProfile]=useState(null);
-  const [name,setName]=useState('');
+  const onboarding=useOnboarding();
+  const [data,setData]=useState(null);
   const [loading,setLoading]=useState(true);
-  const [saving,setSaving]=useState(false);
-  const [saved,setSaved]=useState(false);
   const [error,setError]=useState('');
+  const [name,setName]=useState('');
+  const [orgName,setOrgName]=useState('');
+  const [aria,setAria]=useState('');
+  const [inviteEmail,setInviteEmail]=useState('');
+  const [inviteRole,setInviteRole]=useState('user');
+  const [inviteUrl,setInviteUrl]=useState('');
+  const [saving,setSaving]=useState('');
+  const [password,setPassword]=useState('');
+  const [passwordMessage,setPasswordMessage]=useState('');
 
-  useEffect(()=>{
-    let mounted=true;
-    async function load(){
-      try{
-        const {data:{session}}=await supabase.auth.getSession();
-        if(!session){
-          router.replace('/login');
-          return;
-        }
-        const response=await fetch('/api/profile',{headers:{Authorization:`Bearer ${session.access_token}`}});
-        const data=await response.json();
-        if(!response.ok)throw new Error(data.error||'Unable to load profile');
-        if(mounted){
-          setProfile(data);
-          setName(data.name||'');
-        }
-      }catch(err){
-        console.error('[PROFILE] Load error:',err);
-        if(mounted)setError(err.message||'Unable to load profile');
-      }finally{
-        if(mounted)setLoading(false);
-      }
-    }
-    load();
-    return()=>{mounted=false};
-  },[router]);
-
-  async function save(){
-    const value=name.trim();
-    if(!value||saving)return;
-    setSaving(true);
-    setSaved(false);
-    setError('');
+  const load=async()=>{
+    setLoading(true);setError('');
     try{
       const {data:{session}}=await supabase.auth.getSession();
-      if(!session){
-        router.replace('/login');
-        return;
-      }
-      const response=await fetch('/api/profile',{
-        method:'PUT',
-        headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`},
-        body:JSON.stringify({name:value})
-      });
-      const data=await response.json();
-      if(!response.ok)throw new Error(data.error||'Unable to save profile');
-      setProfile(data);
-      setName(data.name||'');
-      setSaved(true);
-      setTimeout(()=>setSaved(false),2000);
-    }catch(err){
-      console.error('[PROFILE] Save error:',err);
-      setError(err.message||'Unable to save profile');
-    }finally{
-      setSaving(false);
-    }
-  }
+      if(!session){router.replace('/login');return;}
+      const res=await fetch('/api/profile',{headers:{Authorization:`Bearer ${session.access_token}`}});
+      const d=await res.json();
+      if(!res.ok)throw new Error(d.error||'Unable to load profile');
+      setData(d);setName(d.user.name||'');setOrgName(d.organization.name||'');setAria(d.organization.ariaInstructions||'');
+    }catch(e){setError(e.message);}
+    finally{setLoading(false);}
+  };
 
-  async function signOut(){
-    await supabase.auth.signOut();
-    router.replace('/login');
-  }
+  useEffect(()=>{load();},[]);
 
-  if(loading)return <Layout><div style={styles.wrap}><div style={styles.muted}>Loading profile…</div></div></Layout>;
+  const save=async(action,body)=>{
+    setSaving(action);
+    try{
+      const {data:{session}}=await supabase.auth.getSession();
+      const res=await fetch('/api/profile',{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`},body:JSON.stringify({action,...body})});
+      const d=await res.json();
+      if(!res.ok)throw new Error(d.error||'Unable to save');
+      await load();
+    }catch(e){setError(e.message);}
+    finally{setSaving('');}
+  };
 
-  if(error&&!profile)return <Layout><div style={styles.wrap}><h1 style={styles.title}>Profile</h1><div style={styles.error}>{error}</div></div></Layout>;
+  const invite=async()=>{
+    setSaving('invite');setInviteUrl('');
+    try{
+      const {data:{session}}=await supabase.auth.getSession();
+      const res=await fetch('/api/profile',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`},body:JSON.stringify({action:'create_invite',email:inviteEmail,role:inviteRole})});
+      const d=await res.json();
+      if(!res.ok)throw new Error(d.error||'Unable to create invitation');
+      setInviteUrl(d.inviteUrl);setInviteEmail('');
+      await load();
+    }catch(e){setError(e.message);}
+    finally{setSaving('');}
+  };
 
-  return(
-    <Layout>
-      <div style={styles.wrap}>
-        <h1 style={styles.title}>Profile</h1>
-        <p style={styles.subtitle}>Your account and access information.</p>
+  const changePassword=async()=>{
+    setPasswordMessage('');
+    if(password.length<6){setPasswordMessage('Password must be at least 6 characters.');return;}
+    setSaving('password');
+    const {error:e}=await supabase.auth.updateUser({password});
+    setSaving('');
+    if(e)setPasswordMessage(e.message);
+    else{setPassword('');setPasswordMessage('Password updated.');}
+  };
 
-        <section className="fiducia-card" style={styles.card}>
-          <div style={styles.header}>
-            <div style={styles.avatar}>{(profile?.name||profile?.email||'U').charAt(0).toUpperCase()}</div>
-            <div style={styles.identity}>
-              <div style={styles.name}>{profile?.name||'Unnamed user'}</div>
-              <div style={styles.email}>{profile?.email||'—'}</div>
-            </div>
-            <div style={styles.role}>{profile?.role||'user'}</div>
-          </div>
-        </section>
+  const signOut=async()=>{await supabase.auth.signOut();router.replace('/login');};
 
-        <section className="fiducia-card" style={styles.card}>
-          <div style={styles.sectionTitle}>Personal information</div>
-          <label style={styles.label}>Name</label>
-          <input value={name} onChange={e=>setName(e.target.value)} maxLength={120} style={styles.input}/>
-          <label style={styles.label}>Email</label>
-          <input value={profile?.email||''} disabled style={{...styles.input,opacity:.55,cursor:'not-allowed'}}/>
-          <button onClick={save} disabled={saving||!name.trim()||name.trim()===profile?.name} className="fiducia-button fiducia-button-primary" style={styles.button}>
-            {saved?'Saved ✓':saving?'Saving…':'Save changes'}
-          </button>
-          {error&&<div style={styles.error}>{error}</div>}
-        </section>
+  const showExperience=onboarding?.loaded&&onboarding.enabled&&!onboarding.isExperienced('profile');
 
-        <section className="fiducia-card" style={styles.card}>
-          <div style={styles.sectionTitle}>Organization</div>
-          <div style={styles.row}><span>Organization</span><strong>{profile?.organization?.name||'—'}</strong></div>
-          <div style={styles.row}><span>Your role</span><strong style={{textTransform:'capitalize'}}>{profile?.role||'—'}</strong></div>
-          <div style={{...styles.row,borderBottom:'none'}}><span>Member since</span><strong>{profile?.created_at?new Date(profile.created_at).toLocaleDateString():'—'}</strong></div>
-        </section>
+  if(loading)return <Layout><div style={{maxWidth:700,margin:'0 auto',padding:'70px 20px',color:'rgba(255,255,255,.55)'}}>Loading profile…</div></Layout>;
+  if(error&&!data)return <Layout><div style={{maxWidth:700,margin:'0 auto',padding:'70px 20px',color:'#ff8b8b'}}>{error}</div></Layout>;
 
-        <section className="fiducia-card" style={styles.card}>
-          <div style={styles.sectionTitle}>Account</div>
-          <button onClick={signOut} className="fiducia-button fiducia-button-ghost" style={styles.button}>Sign out</button>
-        </section>
+  const u=data.user,o=data.organization,isOwner=u.role==='owner',canInvite=u.role!=='user';
+
+  return <Layout><div style={{maxWidth:760,margin:'0 auto',padding:'38px 20px 70px'}}>
+    {showExperience&&<FirstExperience experience="profile" onComplete={()=>onboarding.completeExperience('profile')}/>}
+    {error&&<div style={{padding:'12px 15px',borderRadius:12,background:'rgba(255,100,100,.08)',color:'#ff9b9b',marginBottom:18}}>{error}</div>}
+
+    <div style={{display:'flex',alignItems:'center',gap:18,marginBottom:34}}>
+      <div style={{width:70,height:70,borderRadius:'50%',display:'grid',placeItems:'center',background:'rgba(0,200,255,.1)',border:'1px solid rgba(0,200,255,.2)',color:'#5ddcff',fontSize:23,fontWeight:600}}>{initials(u.name)}</div>
+      <div style={{minWidth:0}}><h1 style={{margin:0,color:'#f4f4f4',fontSize:30,fontWeight:600}}>{u.name||'Your Profile'}</h1><div style={{marginTop:5,color:'rgba(255,255,255,.5)'}}>{roleLabel(u.role)} · {u.email}</div><div style={{marginTop:4,color:'#5ddcff',fontSize:14}}>{o.name}</div></div>
+    </div>
+
+    <Section title="Personal information">
+      <Field label="Full name"><input value={name} onChange={e=>setName(e.target.value)} /></Field>
+      <Field label="Email"><input value={u.email||''} disabled /></Field>
+      <Field label="Role"><input value={roleLabel(u.role)} disabled /></Field>
+      <button onClick={()=>save('personal',{name})} disabled={saving==='personal'} className="fiducia-button fiducia-button-primary">{saving==='personal'?'Saving…':'Save personal information'}</button>
+    </Section>
+
+    <Section title="Organization">
+      <Field label="Organization name"><input value={orgName} onChange={e=>setOrgName(e.target.value)} disabled={!isOwner}/></Field>
+      <div style={{fontSize:13,color:'rgba(255,255,255,.4)',marginBottom:18}}>{isOwner?'Only the owner can change the organization name.':'Only the organization owner can change the organization name.'}</div>
+      {isOwner&&<button onClick={()=>save('organization',{organizationName:orgName})} disabled={saving==='organization'} className="fiducia-button fiducia-button-primary" style={{marginBottom:24}}>{saving==='organization'?'Saving…':'Save organization'}</button>}
+      <div style={{borderTop:'1px solid rgba(255,255,255,.06)',paddingTop:22}}>
+        <div style={{color:'#D4AF37',fontSize:12,fontWeight:700,letterSpacing:'.08em',textTransform:'uppercase',marginBottom:8}}>ARIA</div>
+        <h3 style={{color:'#f0f0f0',margin:'0 0 7px',fontSize:19}}>Tell ARIA about your organization</h3>
+        <p style={{color:'rgba(255,255,255,.5)',lineHeight:1.6,marginTop:0}}>Give ARIA context about what matters to your organization so its observations and care can be more relevant.</p>
+        <textarea value={aria} onChange={e=>setAria(e.target.value)} maxLength={2000} placeholder="Tell ARIA what matters most to your organization…" />
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:10}}><span style={{fontSize:12,color:'rgba(255,255,255,.3)'}}>{aria.length}/2000</span><button onClick={()=>save('aria',{ariaInstructions:aria})} disabled={saving==='aria'} className="fiducia-button fiducia-button-primary">{saving==='aria'?'Saving…':'Save for ARIA'}</button></div>
       </div>
-    </Layout>
-  );
+    </Section>
+
+    <Section title="Users with access">
+      {canInvite&&<div style={{marginBottom:24}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 120px',gap:10,marginBottom:10}}>
+          <input value={inviteEmail} onChange={e=>setInviteEmail(e.target.value)} placeholder="Email address" />
+          <select value={inviteRole} onChange={e=>setInviteRole(e.target.value)}><option value="user">User</option><option value="admin">Admin</option>{isOwner&&<option value="owner">Owner</option>}</select>
+        </div>
+        <button onClick={invite} disabled={saving==='invite'||!inviteEmail} className="fiducia-button fiducia-button-primary">{saving==='invite'?'Creating link…':'Create invitation link'}</button>
+        {inviteUrl&&<div style={{marginTop:14,padding:14,borderRadius:12,background:'rgba(0,200,255,.05)',border:'1px solid rgba(0,200,255,.12)'}}><div style={{fontSize:12,color:'rgba(255,255,255,.4)',marginBottom:7}}>ONE-TIME INVITATION LINK · EXPIRES IN 48 HOURS</div><input readOnly value={inviteUrl} onFocus={e=>e.target.select()} /></div>}
+      </div>}
+      <div style={{display:'grid',gap:10}}>{data.users.map(x=><div key={x.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 0',borderTop:'1px solid rgba(255,255,255,.05)'}}><div><div style={{color:'#f0f0f0',fontWeight:500}}>{x.name||x.email}</div><div style={{color:'rgba(255,255,255,.4)',fontSize:13,marginTop:3}}>{x.email}</div></div><span style={{fontSize:12,color:x.role==='owner'?'#D4AF37':'rgba(255,255,255,.5)'}}>{roleLabel(x.role)}</span></div>)}</div>
+    </Section>
+
+    <Section title="Account & security">
+      <Field label="New password"><input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 6 characters" /></Field>
+      {passwordMessage&&<div style={{fontSize:13,color:passwordMessage==='Password updated.'?'#7ee2a8':'#ff9b9b',marginBottom:14}}>{passwordMessage}</div>}
+      <button onClick={changePassword} disabled={saving==='password'} className="fiducia-button fiducia-button-primary">{saving==='password'?'Updating…':'Change password'}</button>
+      <button onClick={signOut} className="fiducia-button fiducia-button-ghost" style={{marginTop:12,width:'100%'}}>Sign out</button>
+    </Section>
+
+    <Section title="Preferences">
+      <div style={{padding:'4px 0',color:'rgba(255,255,255,.5)',lineHeight:1.6}}>Appearance and personal notification preferences can live here as NYEOCARE expands them.</div>
+    </Section>
+
+    <style jsx>{`
+      input,select,textarea{box-sizing:border-box;width:100%;padding:12px 14px;border-radius:11px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);color:#fff;outline:none;font:inherit}
+      input:focus,select:focus,textarea:focus{border-color:rgba(0,200,255,.35)}
+      input:disabled{opacity:.55}
+      textarea{min-height:125px;resize:vertical;line-height:1.6}
+      select option{background:#111923;color:#fff}
+      @media(max-width:560px){div[style*="grid-template-columns:1fr 120px"]{grid-template-columns:1fr!important}}
+    `}</style>
+  </div></Layout>;
 }
 
-const styles={
-  wrap:{maxWidth:700,margin:'0 auto',padding:'40px 20px'},
-  title:{fontSize:30,fontWeight:600,color:'#f0f0f0',margin:'0 0 8px'},
-  subtitle:{fontSize:15,color:'rgba(255,255,255,.45)',margin:'0 0 30px'},
-  card:{padding:24,marginBottom:18},
-  header:{display:'flex',alignItems:'center',gap:16},
-  avatar:{width:58,height:58,borderRadius:'50%',background:'rgba(212,175,55,.12)',border:'1px solid rgba(212,175,55,.25)',display:'flex',alignItems:'center',justifyContent:'center',color:'#D4AF37',fontSize:23,fontWeight:600,flexShrink:0},
-  identity:{flex:1,minWidth:0},
-  name:{color:'#f0f0f0',fontSize:19,fontWeight:600,marginBottom:5},
-  email:{color:'rgba(255,255,255,.45)',fontSize:14,overflow:'hidden',textOverflow:'ellipsis'},
-  role:{padding:'6px 10px',borderRadius:20,background:'rgba(255,255,255,.06)',color:'rgba(255,255,255,.65)',fontSize:12,textTransform:'capitalize'},
-  sectionTitle:{color:'#D4AF37',fontSize:14,fontWeight:600,letterSpacing:'.05em',marginBottom:20},
-  label:{display:'block',color:'rgba(255,255,255,.5)',fontSize:13,margin:'0 0 7px'},
-  input:{width:'100%',boxSizing:'border-box',padding:'12px 14px',borderRadius:10,border:'1px solid rgba(255,255,255,.08)',background:'rgba(255,255,255,.03)',color:'#fff',outline:'none',fontSize:15,marginBottom:16},
-  button:{width:'100%',marginTop:4},
-  row:{display:'flex',justifyContent:'space-between',alignItems:'center',gap:20,padding:'13px 0',borderBottom:'1px solid rgba(255,255,255,.06)',color:'rgba(255,255,255,.45)',fontSize:14},
-  muted:{color:'rgba(255,255,255,.5)'},
-  error:{color:'#ff8f8f',fontSize:13,marginTop:12}
-};
+function Section({title,children}){return <section className="fiducia-card" style={{padding:24,marginBottom:20}}><h2 style={{fontSize:20,fontWeight:500,color:'#f0f0f0',margin:'0 0 20px'}}>{title}</h2>{children}</section>}
+function Field({label,children}){return <div style={{marginBottom:16}}><label style={{display:'block',fontSize:13,color:'rgba(255,255,255,.45)',marginBottom:7}}>{label}</label>{children}</div>}
