@@ -1,5 +1,5 @@
 // pages/api/users/invite.js
-import crypto from'react';
+import crypto from'crypto';
 import pool from'../../../lib/db';
 import{getCurrentCareUser}from'../../../lib/auth';
 
