@@ -1,42 +1,54 @@
-
 // pages/api/users/join.js
-import crypto from 'crypto';
-import pool from '../../../lib/db';
-import { getAuthUser } from '../../../lib/auth';
+import crypto from'crypto';
+import pool from'../../../lib/db';
+import{getAuthUser}from'../../../lib/auth';
 
 const hash=t=>crypto.createHash('sha256').update(t).digest('hex');
 
 export default async function handler(req,res){
-  if(req.method!=='POST')return res.status(405).json({error:'Method not allowed'});
-  const authUser=await getAuthUser(req);
-  if(!authUser)return res.status(401).json({error:'Please sign in or create your account first.'});
-  const token=String(req.body?.token||'').trim();
-  if(!token)return res.status(400).json({error:'Invitation link is invalid.'});
-  const client=await pool.connect();
-  try{
-    await client.query('BEGIN');
-    const invite=await client.query(`SELECT i.*,o.name organization_name FROM organization_invites i JOIN organizations o ON o.id=i.organization_id WHERE i.token_hash=$1 AND i.used_at IS NULL AND i.expires_at>now() FOR UPDATE`,[hash(token)]);
-    if(!invite.rows.length){await client.query('ROLLBACK');return res.status(410).json({error:'This invitation has expired, been used, or is no longer available.'});}
-    const i=invite.rows[0];
-    const existing=await client.query(`SELECT id,organization_id FROM users WHERE supabase_user_id=$1`,[authUser.id]);
-    if(existing.rows.length){
-      if(existing.rows[0].organization_id===i.organization_id){
-        await client.query('UPDATE organization_invites SET used_at=now(),used_by=$1 WHERE id=$2',[existing.rows[0].id,i.id]);
-        await client.query('COMMIT');
-        return res.status(200).json({success:true,alreadyMember:true,organization_name:i.organization_name});
-      }
-      await client.query('ROLLBACK');
-      return res.status(409).json({error:'This account already belongs to another organization.'});
-    }
-    const name=authUser.user_metadata?.name||authUser.user_metadata?.full_name||authUser.email?.split('@')[0]||'User';
-    const email=authUser.email||'';
-    const inserted=await client.query(`INSERT INTO users(supabase_user_id,email,name,role,organization_id,password_hash) VALUES($1,$2,$3,$4,$5,'supabase_managed') RETURNING id,name,role`,[authUser.id,email,name,i.role,i.organization_id]);
-    await client.query(`UPDATE organization_invites SET used_at=now(),used_by=$1 WHERE id=$2`,[inserted.rows[0].id,i.id]);
-    await client.query('COMMIT');
-    return res.status(200).json({success:true,organization_name:i.organization_name,user:inserted.rows[0]});
-  }catch(error){
-    await client.query('ROLLBACK');
-    console.error('[JOIN]',error);
-    return res.status(500).json({error:'Unable to join the organization.'});
-  }finally{client.release();}
+if(req.method!=='POST')return res.status(405).json({error:'Method not allowed'});
+const authUser=await getAuthUser(req);
+if(!authUser)return res.status(401).json({error:'Please sign in or create your NYEOCARE account first.'});
+const token=typeof req.body?.token==='string'?req.body.token.trim():'';
+if(!token)return res.status(400).json({error:'Invitation link is invalid.'});
+const client=await pool.connect();
+try{
+await client.query('BEGIN');
+const invite=await client.query('SELECT i.id,i.organization_id,i.email,i.role,i.expires_at,o.name AS organization_name FROM organization_invites i JOIN organizations o ON o.id=i.organization_id WHERE i.token_hash=$1 AND i.used_at IS NULL AND i.expires_at>NOW() FOR UPDATE',[hash(token)]);
+if(!invite.rows.length){
+await client.query('ROLLBACK');
+return res.status(410).json({error:'This invitation has expired, been used, or is no longer available.'});
 }
+const i=invite.rows[0];
+const email=String(authUser.email||'').trim().toLowerCase();
+if(!email){
+await client.query('ROLLBACK');
+return res.status(400).json({error:'Your NYEOCARE account does not have an email address.'});
+}
+if(i.email&&i.email.toLowerCase()!==email){
+await client.query('ROLLBACK');
+return res.status(403).json({error:`This invitation was created for ${i.email}. Please sign in with that email.`});
+}
+const existing=await client.query('SELECT id,organization_id,role FROM users WHERE supabase_user_id=$1 LIMIT 1',[authUser.id]);
+if(existing.rows.length){
+if(existing.rows[0].organization_id!==i.organization_id){
+await client.query('ROLLBACK');
+return res.status(409).json({error:'Your account already belongs to another organization.'});
+}
+await client.query('UPDATE organization_invites SET used_at=NOW(),accepted_by=$1 WHERE id=$2 AND used_at IS NULL',[existing.rows[0].id,i.id]);
+await client.query('COMMIT');
+return res.status(200).json({success:true,alreadyMember:true,organization_id:i.organization_id,organization_name:i.organization_name,role:existing.rows[0].role});
+}
+const name=String(authUser.user_metadata?.name||authUser.user_metadata?.full_name||email.split('@')[0]||'User').trim();
+const inserted=await client.query('INSERT INTO users(organization_id,email,name,role,supabase_user_id,password_hash) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,name,email,role,organization_id',[i.organization_id,email,name,i.role,authUser.id,'supabase_managed']);
+await client.query('UPDATE organization_invites SET used_at=NOW(),accepted_by=$1 WHERE id=$2 AND used_at IS NULL',[inserted.rows[0].id,i.id]);
+await client.query('COMMIT');
+return res.status(200).json({success:true,alreadyMember:false,organization_id:i.organization_id,organization_name:i.organization_name,user:inserted.rows[0]});
+}catch(error){
+await client.query('ROLLBACK');
+console.error('[JOIN]',error);
+return res.status(500).json({error:'Unable to join the organization.'});
+}finally{
+client.release();
+}
+  }
