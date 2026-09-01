@@ -1,3 +1,4 @@
+
 // pages/api/users/join.js
 import crypto from 'crypto';
 import pool from '../../../lib/db';
