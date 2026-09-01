@@ -23,4 +23,4 @@ export default async function handler(req,res){
     console.error('[INVITE]',error);
     return res.status(500).json({error:'Unable to create invitation.'});
   }
-}
+    }
