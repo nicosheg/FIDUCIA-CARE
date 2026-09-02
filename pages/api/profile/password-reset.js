@@ -16,4 +16,4 @@ return res.status(200).json({success:true});
 console.error('[PASSWORD_RESET]',e?.message||e);
 return res.status(500).json({error:'Unable to send the secure reset link.'});
 }
-}
+  }
