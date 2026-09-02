@@ -14,18 +14,16 @@ return res.status(200).json({user:{id:user.id,name:user.name,email:user.email,ro
 }
 if(req.method==='PATCH'){
 const{name,ariaInstructions,userName}=req.body||{};
+try{
 if(userName!==undefined){
 const cleaned=String(userName||'').trim();
 if(!cleaned||cleaned.length>120)return res.status(400).json({error:'Your name must be between 1 and 120 characters.'});
-try{
 const r=await pool.query(`UPDATE users SET name=$1,updated_at=now() WHERE id=$2 AND organization_id=$3 AND active=true RETURNING id,name,email,role,active,last_login_at`,[cleaned,user.id,user.organization_id]);
 if(!r.rows.length)return res.status(404).json({error:'Unable to update your name.'});
 return res.status(200).json({success:true,user:r.rows[0]});
-}catch(e){return res.status(500).json({error:'Unable to update your name.'})}
 }
 if(name!==undefined&&user.role!=='owner')return res.status(403).json({error:'Only the owner can change the organization name.'});
 if(ariaInstructions!==undefined&&!['owner','admin'].includes(user.role))return res.status(403).json({error:'Only owners and admins can edit ARIA organization knowledge.'});
-try{
 if(name!==undefined){
 const cleaned=String(name||'').trim();
 if(!cleaned||cleaned.length>120)return res.status(400).json({error:'Organization name must be between 1 and 120 characters.'});
@@ -41,7 +39,10 @@ pool.query(`SELECT id,name,aria_instructions FROM organizations WHERE id=$1`,[us
 pool.query(`SELECT id,name,email,role,active,last_login_at FROM users WHERE id=$1`,[user.id])
 ]);
 return res.status(200).json({success:true,user:u.rows[0],organization:r.rows[0]});
-}catch(e){return res.status(500).json({error:'Unable to save changes.'})}
+}catch(e){
+console.error('[PROFILE]',e?.message||e);
+return res.status(500).json({error:'Unable to save changes.'});
+}
 }
 return res.status(405).json({error:'Method not allowed.'});
-                             }
+                                   }
