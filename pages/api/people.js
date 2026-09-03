@@ -21,12 +21,10 @@ async function handler(req,res){
   const name=String(first_name||'').trim();
   if(!name)return res.status(400).json({error:'first_name is required'});
   if(name.length>150)return res.status(400).json({error:'Name is too long'});
-  const normalizedPhone=normalizePhone(phone);
+  const normalizedPhone=normalizePhone(phone)||null;
   const normalizedEmail=String(email||'').trim().toLowerCase()||null;
   const personType=String(type||'visitor').trim()||'visitor';
   try{
-   const duplicate=normalizedPhone?await pool.query(`SELECT id,first_name,last_name FROM people WHERE organization_id=$1 AND phone=$2 AND COALESCE(status,'active')='active' LIMIT 1`,[orgId,normalizedPhone]):{rows:[]};
-   if(duplicate.rows.length)return res.status(409).json({error:'A person with this phone number already exists in this organization.',duplicate:duplicate.rows[0]});
    const result=await pool.query(`INSERT INTO people(organization_id,first_name,last_name,phone,email,type,birthday,created_by,living_truth,status,source) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'active','manual') RETURNING *`,[
     orgId,name,String(last_name||'').trim(),normalizedPhone,normalizedEmail,personType,birthday||null,req.user.id,
     JSON.stringify({status:'alive',confidence:90,source:'canonical_record',updated_at:new Date().toISOString()})
