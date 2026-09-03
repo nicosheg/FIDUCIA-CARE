@@ -18,7 +18,6 @@ const email=String(authUser.email||'').trim().toLowerCase();
 if(!email)return res.status(400).json({error:'Your NYEOCARE account does not have an email address.'});
 
 const suppliedName=typeof req.body?.name==='string'?req.body.name.trim():'';
-
 if(suppliedName.length>120)return res.status(400).json({error:'Your display name is too long.'});
 
 const client=await pool.connect();
@@ -27,19 +26,11 @@ try{
 await client.query('BEGIN');
 
 const invite=await client.query(
-`SELECT
-i.id,
-i.organization_id,
-i.email,
-i.role,
-i.expires_at,
-o.name AS organization_name
-FROM organization_invites i
-JOIN organizations o ON o.id=i.organization_id
-WHERE i.token_hash=$1
-AND i.used_at IS NULL
-AND i.expires_at>NOW()
-FOR UPDATE`,
+`SELECT i.id,i.organization_id,i.email,i.role,i.expires_at,o.name AS organization_name
+ FROM organization_invites i
+ JOIN organizations o ON o.id=i.organization_id
+ WHERE i.token_hash=$1 AND i.used_at IS NULL AND i.expires_at>NOW()
+ FOR UPDATE`,
 [hash(token)]
 );
 
@@ -57,9 +48,9 @@ return res.status(403).json({error:`This invitation was created for ${i.email}. 
 
 const existing=await client.query(
 `SELECT id,organization_id,role,name,active
-FROM users
-WHERE supabase_user_id=$1
-LIMIT 1`,
+ FROM users
+ WHERE supabase_user_id=$1
+ LIMIT 1`,
 [authUser.id]
 );
 
@@ -76,10 +67,18 @@ await client.query('ROLLBACK');
 return res.status(409).json({error:'Your account already belongs to another organization.'});
 }
 
+if(suppliedName&&suppliedName!==member.name){
+await client.query(
+`UPDATE users SET name=$1 WHERE id=$2`,
+[suppliedName,member.id]
+);
+member.name=suppliedName;
+}
+
 await client.query(
 `UPDATE organization_invites
-SET used_at=NOW(),accepted_by=$1
-WHERE id=$2 AND used_at IS NULL`,
+ SET used_at=NOW(),accepted_by=$1
+ WHERE id=$2 AND used_at IS NULL`,
 [member.id,i.id]
 );
 
@@ -91,43 +90,34 @@ alreadyMember:true,
 organization_id:i.organization_id,
 organization_name:i.organization_name,
 role:member.role,
-user:{
-id:member.id,
-name:member.name,
-role:member.role
-}
+user:{id:member.id,name:member.name,role:member.role}
 });
 }
 
-const name=suppliedName||
-String(
+const name=suppliedName||String(
 authUser.user_metadata?.name||
 authUser.user_metadata?.full_name||
 email.split('@')[0]||
 'User'
 ).trim();
 
-if(!name)return res.status(400).json({error:'Please provide a display name.'});
+if(!name){
+await client.query('ROLLBACK');
+return res.status(400).json({error:'Please provide a display name.'});
+}
 
 const inserted=await client.query(
 `INSERT INTO users
 (organization_id,email,name,role,supabase_user_id,password_hash,active)
 VALUES($1,$2,$3,$4,$5,$6,true)
 RETURNING id,name,email,role,organization_id`,
-[
-i.organization_id,
-email,
-name,
-i.role,
-authUser.id,
-'supabase_managed'
-]
+[i.organization_id,email,name,i.role,authUser.id,'supabase_managed']
 );
 
 await client.query(
 `UPDATE organization_invites
-SET used_at=NOW(),accepted_by=$1
-WHERE id=$2 AND used_at IS NULL`,
+ SET used_at=NOW(),accepted_by=$1
+ WHERE id=$2 AND used_at IS NULL`,
 [inserted.rows[0].id,i.id]
 );
 
