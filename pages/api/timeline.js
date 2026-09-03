@@ -1,30 +1,102 @@
+// pages/api/timeline.js
 import pool from '../../lib/db';
+import { withOrg } from '../../lib/apiHelpers';
 
-export default async function handler(req, res) {
-  if (req.method === 'POST') {
-    const { person_id, event_type, channel, description, metadata, organization_id } = req.body;
-    if (!person_id || !event_type) return res.status(400).json({ error: 'Missing person_id or event_type' });
-    try {
-      const result = await pool.query(
-        `INSERT INTO timeline_events (person_id, organization_id, event_type, channel, description, metadata)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [person_id, organization_id || 'demo-org', event_type, channel || null, description || '', metadata || {}]
-      );
-      return res.status(200).json(result.rows[0]);
-    } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
-  }
+async function handler(req,res){
+  const orgId=req.org.id;
 
-  if (req.method === 'GET') {
-    const personId = req.query.person_id;
-    const orgId = req.query.organization_id || 'demo-org';
-    try {
-      const { rows } = await pool.query(
-        `SELECT * FROM timeline_events WHERE person_id = $1 AND organization_id = $2 ORDER BY created_at DESC`,
-        [personId, orgId]
-      );
+  if(req.method==='GET'){
+    const personId=req.query.person_id;
+
+    if(!personId){
+      return res.status(400).json({
+        error:'person_id is required'
+      });
+    }
+
+    try{
+      const {rows}=await pool.query(`
+        SELECT t.*
+        FROM timeline_events t
+        JOIN people p
+          ON p.id=t.person_id
+         AND p.organization_id=t.organization_id
+        WHERE t.person_id=$1
+          AND t.organization_id=$2
+        ORDER BY t.created_at DESC
+      `,[personId,orgId]);
+
       return res.status(200).json(rows);
-    } catch (err) { console.error(err); res.status(500).json({ error: err.message }); }
+    }catch(err){
+      console.error('GET timeline error:',err);
+      return res.status(500).json({
+        error:'Unable to load timeline'
+      });
+    }
   }
 
-  res.status(405).end();
+  if(req.method==='POST'){
+    const{
+      person_id,
+      event_type,
+      channel,
+      description,
+      metadata
+    }=req.body||{};
+
+    if(!person_id||!event_type){
+      return res.status(400).json({
+        error:'person_id and event_type are required'
+      });
+    }
+
+    try{
+      const person=await pool.query(`
+        SELECT id
+        FROM people
+        WHERE id=$1
+          AND organization_id=$2
+        LIMIT 1
+      `,[person_id,orgId]);
+
+      if(!person.rows.length){
+        return res.status(404).json({
+          error:'Person not found'
+        });
+      }
+
+      const result=await pool.query(`
+        INSERT INTO timeline_events(
+          person_id,
+          organization_id,
+          event_type,
+          channel,
+          description,
+          metadata
+        )
+        VALUES($1,$2,$3,$4,$5,$6)
+        RETURNING *
+      `,[
+        person_id,
+        orgId,
+        event_type,
+        channel||null,
+        description||'',
+        metadata||{}
+      ]);
+
+      return res.status(200).json(result.rows[0]);
+    }catch(err){
+      console.error('POST timeline error:',err);
+      return res.status(500).json({
+        error:'Unable to create timeline event'
+      });
+    }
   }
+
+  return res.status(405).json({
+    error:'Method not allowed'
+  });
+}
+
+export default withOrg(handler);
