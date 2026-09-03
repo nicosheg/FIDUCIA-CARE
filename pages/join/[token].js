@@ -21,6 +21,7 @@ const[error,setError]=useState('');
 useEffect(()=>{
 if(!router.isReady||!token)return;
 let active=true;
+
 fetch(`/api/invites/${encodeURIComponent(token)}`)
 .then(async r=>{
 const d=await r.json();
@@ -38,15 +39,17 @@ if(!active)return;
 setError(e.message||'Invitation unavailable.');
 setState('error');
 });
+
 return()=>{active=false};
 },[router.isReady,token]);
 
 const validate=()=>{
 const cleanName=name.trim();
 const cleanEmail=email.trim().toLowerCase();
+
 if(!cleanEmail)return'Please enter your email address.';
 if(mode==='create'&&!cleanName)return'Please enter your display name.';
-if(mode==='create'&&cleanName.length>120)return'Your display name is too long.';
+if(cleanName.length>120)return'Your display name is too long.';
 if(password.length<6)return'Your password must be at least 6 characters.';
 if(mode==='create'&&password!==confirm)return'The passwords do not match.';
 return'';
@@ -54,19 +57,22 @@ return'';
 
 const join=async()=>{
 if(working)return;
+
 setError('');
 const validation=validate();
 if(validation)return setError(validation);
+
 setWorking(true);
 
 try{
+const cleanName=name.trim();
 const cleanEmail=email.trim().toLowerCase();
 
 const auth=mode==='create'
 ?await supabase.auth.signUp({
 email:cleanEmail,
 password,
-options:{data:{name:name.trim()}}
+options:{data:{name:cleanName}}
 })
 :await supabase.auth.signInWithPassword({
 email:cleanEmail,
@@ -75,19 +81,23 @@ password
 
 if(auth.error){
 const msg=auth.error.message?.toLowerCase()||'';
+
 if(mode==='create'&&(msg.includes('already registered')||msg.includes('already exists')||msg.includes('already been registered'))){
 setError('This email already has a NYEOCARE account. Choose “I already have an account” below.');
 return;
 }
+
 throw auth.error;
 }
 
 const session=auth.data?.session;
 
 if(!session){
-setError(mode==='create'
-?'Your account was created. Check your email to confirm it, then open this invitation again.'
-:'Sign in completed, but no session was created. Please try again.');
+setError(
+mode==='create'
+?'Your account has been created. Check your email to verify it, then open this invitation again.'
+:'Sign in completed, but no session was created. Please try again.'
+);
 return;
 }
 
@@ -99,7 +109,7 @@ Authorization:`Bearer ${session.access_token}`
 },
 body:JSON.stringify({
 token,
-name:mode==='create'?name.trim():undefined
+name:mode==='create'?cleanName:undefined
 })
 });
 
@@ -109,6 +119,7 @@ if(!r.ok)throw new Error(d.error||'Unable to join the organization.');
 
 setData(prev=>({...prev,...d}));
 setState('joined');
+
 setTimeout(()=>router.replace('/'),900);
 }catch(e){
 setError(e.message||'Unable to continue.');
@@ -206,17 +217,21 @@ disabled={working}
 />
 <button type="button" onClick={()=>setShowConfirm(v=>!v)} disabled={working}>{showConfirm?'Hide':'Show'}</button>
 </div>
-<div className="hint">Use at least 6 characters. You'll use this password to sign in to NYEOCARE.</div>
+<div className="hint">At least 6 characters. This password will be used to sign in to NYEOCARE.</div>
 </>}
 
 {error&&<div className="error">{error}</div>}
 
 <button className="primary" onClick={join} disabled={working}>
-{working?(mode==='create'?'Creating account…':'Signing in…'):(mode==='create'?'Create account & join':'Sign in & join')}
+{working
+?(mode==='create'?'Creating account…':'Signing in…')
+:(mode==='create'?'Create account & join':'Sign in & join')}
 </button>
 
 <button className="switch" onClick={switchMode} disabled={working}>
-{mode==='create'?'Already have a NYEOCARE account? Sign in instead':'New to NYEOCARE? Create your account instead'}
+{mode==='create'
+?'Already have a NYEOCARE account? Sign in instead'
+:'New to NYEOCARE? Create your account instead'}
 </button>
 
 <small>Your account will join <strong>{data.organization_name}</strong> with the invited responsibility.</small>
