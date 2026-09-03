@@ -1,154 +1,39 @@
-import { useRouter } from 'next/router';
-import { useEffect, useState } from 'react';
+// pages/person/[id].js
+import {useRouter} from 'next/router';
+import {useEffect,useState} from 'react';
 import Layout from '../../components/Layout';
+import {supabase} from '../../lib/supabaseClient';
 
-export default function PersonStory() {
-  const router = useRouter();
-  const { id } = router.query;
-  const [timeline, setTimeline] = useState([]);
-  const [person, setPerson] = useState(null);
-  const [actions, setActions] = useState([]); // <-- NEW: for ARIA suggestions
+const title=p=>[p?.first_name,p?.last_name].filter(Boolean).join(' ')||p?.display_name||'Person';
+const date=v=>v?new Date(v).toLocaleDateString():null;
 
-  // Fetch person, timeline, and ARIA actions
-  useEffect(() => {
-    if (!id) return;
-
-    // Fetch person
-    fetch(`/api/people?organization_id=demo-org`)
-      .then(r => r.json())
-      .then(people => setPerson(people.find(p => p.id === id) || null));
-
-    // Fetch timeline
-    fetch(`/api/timeline?person_id=${id}&organization_id=demo-org`)
-      .then(r => r.json())
-      .then(data => setTimeline(data));
-
-    // NEW: Fetch ARIA contextual actions
-    fetch(`/api/person/context-actions?person_id=${id}`)
-      .then(r => r.json())
-      .then(data => setActions(data.actions || []))
-      .catch(() => setActions([]));
-  }, [id]);
-
-  // NEW: Handle clicking an ARIA suggestion
-  const handleActionClick = async (action) => {
-    if (!person) return;
-    try {
-      const res = await fetch('/api/presence/draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ person_id: id, type: action.type }),
-      });
-      const data = await res.json();
-      if (data.message) {
-        const phone = person.phone?.startsWith('+') ? person.phone.substring(1) : person.phone;
-        if (phone) {
-          window.open(`https://wa.me/${phone}?text=${encodeURIComponent(data.message)}`, '_blank');
-        } else {
-          alert('No phone number saved for this person.');
-        }
-      }
-    } catch (e) {
-      console.error('Action error:', e);
-    }
-  };
-
-  if (!person) return <Layout><p>Loading profile…</p></Layout>;
-
-  return (
-    <Layout>
-      <div style={{ maxWidth: 700, margin: '0 auto', padding: '30px 20px' }}>
-        {/* Profile Header */}
-        <div style={profileHeader}>
-          <div style={avatar}>
-            {person.first_name[0]}{person.last_name?.[0] || ''}
-          </div>
-          <div>
-            <h1 style={name}>{person.first_name} {person.last_name}</h1>
-            <p style={phone}>{person.phone || 'No phone'}</p>
-          </div>
-        </div>
-
-        {/* ===== NEW: ARIA CONTEXTUAL ACTIONS ===== */}
-        {actions.length > 0 && (
-          <div style={{ marginBottom: 30 }}>
-            <h2 style={sectionTitle}>ARIA suggests</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {actions.map((action, i) => (
-                <div
-                  key={i}
-                  style={{
-                    padding: '14px 18px',
-                    cursor: 'pointer',
-                    borderRadius: 12,
-                    background: 'rgba(212, 175, 55, 0.04)',
-                    border: '1px solid rgba(212, 175, 55, 0.15)',
-                    transition: 'background 0.2s',
-                  }}
-                  onClick={() => handleActionClick(action)}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(212, 175, 55, 0.1)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(212, 175, 55, 0.04)')}
-                >
-                  <div style={{ fontWeight: 600, fontSize: 15, color: '#D4AF37', marginBottom: 4 }}>
-                    {action.label}
-                  </div>
-                  <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>
-                    {action.description}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Journey / Timeline */}
-        <h2 style={sectionTitle}>Journey</h2>
-        <div style={timelineContainer}>
-          {timeline.map((event) => (
-            <div key={event.id} style={eventDot}>
-              <div style={dot} />
-              <div style={eventContent}>
-                <div style={eventType}>{event.event_type}</div>
-                <div style={eventDesc}>{event.description}</div>
-                <div style={eventTime}>{new Date(event.created_at).toLocaleDateString()}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Ambient AI insight */}
-        {timeline.length > 0 && (
-          <div style={ambientInsight}>
-            AI has noticed this person responds better to evening messages.
-          </div>
-        )}
-      </div>
-    </Layout>
-  );
+export default function PersonStory(){
+const router=useRouter(),{id}=router.query;
+const [person,setPerson]=useState(null),[token,setToken]=useState(null),[loading,setLoading]=useState(true),[error,setError]=useState('');
+useEffect(()=>{supabase.auth.getSession().then(({data:{session}})=>{if(!session){setLoading(false);return}setToken(session.access_token)})},[]);
+useEffect(()=>{if(!id||!token)return;fetch(`/api/people/operating-system?resource=profile&person_id=${encodeURIComponent(id)}`,{headers:{Authorization:`Bearer ${token}`}}).then(async r=>{const d=await r.json();if(!r.ok)throw new Error(d.error||'Unable to load person');setPerson(d)}).catch(e=>setError(e.message)).finally(()=>setLoading(false))},[id,token]);
+if(loading)return <Layout><div style={wrap}>Loading person…</div></Layout>;
+if(error)return <Layout><div style={wrap}>{error}</div></Layout>;
+if(!person)return <Layout><div style={wrap}>Person not found.</div></Layout>;
+return <Layout><div style={wrap}>
+<div style={header}><div style={avatar}>{(person.first_name||person.display_name||'?')[0]}{person.last_name?.[0]||''}</div><div><h1 style={name}>{title(person)}</h1><div style={muted}>{person.phone||'No phone'}{person.email?` · ${person.email}`:''}</div></div></div>
+<div style={grid}>
+<Section title="Identity"><Item k="Type" v={person.type}/><Item k="Status" v={person.status}/><Item k="Birthday" v={date(person.birthday)}/><Item k="Source" v={person.source}/></Section>
+<Section title="ARIA"><Item k="Lifecycle" v={person.intelligence_lifecycle||'—'}/><Item k="Engagement" v={person.engagement_score==null?'—':`${person.engagement_score}/100`}/><Item k="Churn" v={person.churn_probability==null?'—':`${Math.round(Number(person.churn_probability)*100)}%`}/><Item k="Attention" v={person.attention_level||'—'}/><Item k="Next best action" v={person.next_best_action||'—'}/></Section>
+<Section title="Roles">{person.roles?.length?person.roles.map(x=><div key={x.id} style={row}><b>{x.role}</b><span style={muted}>{x.status}</span></div>):<Empty/>}</Section>
+<Section title="Groups & Memberships">{person.groups?.length?person.groups.map(x=><div key={x.id} style={row}><b>{x.name}</b><span style={muted}>{x.group_type}{x.membership_role?` · ${x.membership_role}`:''}</span></div>):<Empty/>}</Section>
+<Section title="Relationships">{person.relationships?.length?person.relationships.map(x=><div key={x.id} style={row}><b>{title({first_name:x.related_first_name,last_name:x.related_last_name,display_name:x.related_display_name})}</b><span style={muted}>{x.relationship_type}</span></div>):<Empty/>}</Section>
+<Section title="Custom Fields">{person.fields?.length?person.fields.map(x=><div key={x.id} style={row}><b>{x.field_name}</b><span style={muted}>{typeof x.value==='object'?JSON.stringify(x.value):String(x.value??'—')}</span></div>):<Empty/>}</Section>
+<Section title="Lifecycle History">{person.lifecycle?.length?person.lifecycle.map(x=><div key={x.id} style={row}><b>{x.stage_name}</b><span style={muted}>{date(x.started_at)}{x.ended_at?` → ${date(x.ended_at)}`:' · current'}</span></div>):<Empty/>}</Section>
+<Section title="Tasks">{person.tasks?.length?person.tasks.map(x=><div key={x.id} style={row}><b>{x.title}</b><span style={muted}>{x.status}{x.due_at?` · ${date(x.due_at)}`:''}</span></div>):<Empty/>}</Section>
+<Section title="Financial Records">{person.financial?.length?person.financial.map(x=><div key={x.id} style={row}><b>{x.record_type}</b><span style={muted}>{x.amount==null?'':`${x.currency} ${x.amount}`} · {x.status}</span></div>):<Empty/>}</Section>
+<Section title="Documents">{person.documents?.length?person.documents.map(x=><div key={x.id} style={row}><b>{x.name}</b><span style={muted}>{x.document_type}{x.expires_at?` · expires ${date(x.expires_at)}`:''}</span></div>):<Empty/>}</Section>
+<Section title="Communications">{person.communications?.length?person.communications.map(x=><div key={x.id} style={row}><b>{x.channel}</b><span style={muted}>{x.direction} · {x.status} · {date(x.occurred_at)}</span></div>):<Empty/>}</Section>
+<Section title="Journey" wide>{person.timeline?.length?person.timeline.map(x=><div key={x.id} style={timeline}><b>{x.title||x.event_type}</b><div style={muted}>{x.description}</div><small style={muted}>{date(x.occurred_at||x.created_at)}</small></div>):<Empty/>}</Section>
+</div></div></Layout>
 }
 
-// ===== STYLES (unchanged from your original) =====
-const profileHeader = { display: 'flex', gap: 16, alignItems: 'center', marginBottom: 30 };
-const avatar = {
-  width: 56, height: 56, borderRadius: '50%', background: 'rgba(212,175,55,0.2)',
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  color: '#D4AF37', fontWeight: 600, fontSize: 22,
-};
-const name = { fontSize: 24, fontWeight: 600, color: '#f0f0f0', margin: 0 };
-const phone = { color: 'rgba(255,255,255,0.5)', fontSize: 14, margin: '4px 0 0' };
-const sectionTitle = { fontSize: 18, fontWeight: 600, color: '#D4AF37', marginBottom: 20 };
-const timelineContainer = { display: 'flex', flexDirection: 'column', gap: 0, position: 'relative' };
-const dot = {
-  width: 10, height: 10, borderRadius: '50%', background: '#D4AF37',
-  marginRight: 16, flexShrink: 0, marginTop: 6,
-};
-const eventDot = { display: 'flex', alignItems: 'flex-start', marginBottom: 16 };
-const eventContent = { flex: 1 };
-const eventType = { fontSize: 13, color: '#D4AF37', fontWeight: 600, marginBottom: 4 };
-const eventDesc = { fontSize: 14, color: '#f0f0f0' };
-const eventTime = { fontSize: 11, color: 'rgba(255,255,255,0.4)', marginTop: 4 };
-const ambientInsight = {
-  marginTop: 30, padding: '14px 20px', borderRadius: 16,
-  background: 'rgba(212,175,55,0.05)', border: '1px solid rgba(212,175,55,0.1)',
-  color: '#D4AF37', fontSize: 14,
-};
+function Section({title,children,wide}){return <section style={{...card,gridColumn:wide?'1/-1':'auto'}}><h2 style={sectionTitle}>{title}</h2>{children}</section>}
+function Item({k,v}){return <div style={row}><b>{k}</b><span style={muted}>{v||'—'}</span></div>}
+function Empty(){return <div style={muted}>Nothing recorded yet.</div>}
+const wrap={maxWidth:1100,margin:'0 auto',padding:'30px 20px',color:'#f0f0f0'},header={display:'flex',alignItems:'center',gap:16,marginBottom:24},avatar={width:64,height:64,borderRadius:'50%',background:'rgba(212,175,55,.16)',display:'flex',alignItems:'center',justifyContent:'center',color:'#D4AF37',fontSize:24,fontWeight:700},name={margin:0,fontSize:28},muted={color:'rgba(255,255,255,.55)',fontSize:13},grid={display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))',gap:14},card={background:'rgba(20,25,40,.72)',border:'1px solid rgba(255,255,255,.06)',borderRadius:16,padding:18},sectionTitle={margin:'0 0 14px',fontSize:16,color:'#D4AF37'},row={display:'flex',justifyContent:'space-between',gap:16,padding:'8px 0',borderBottom:'1px solid rgba(255,255,255,.04)'},timeline={padding:'10px 0',borderBottom:'1px solid rgba(255,255,255,.05)',display:'grid',gap:4};
