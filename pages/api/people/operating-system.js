@@ -22,8 +22,63 @@ function value(v,fallback=null){
 return v===undefined?fallback:v;
 }
 
+function resourceData(resource,b){
+const metadata=json(b.metadata);
+if(resource==='financial'){
+if(b.frequency!==undefined)metadata.frequency=b.frequency;
+if(b.source!==undefined)metadata.source=b.source;
+return{
+record_type:value(b.record_type,'payment'),
+status:value(b.status,'completed'),
+amount:value(b.amount),
+currency:value(b.currency,'NGN'),
+reference:value(b.reference),
+due_date:value(b.due_date),
+paid_at:value(b.paid_at),
+expires_at:value(b.expires_at),
+description:value(b.description),
+metadata
+};
+}
+if(resource==='document'){
+if(b.description!==undefined)metadata.description=b.description;
+return{
+name:value(b.name),
+document_type:value(b.document_type,'record'),
+storage_path:value(b.storage_path),
+document_url:value(b.document_url!==undefined?b.document_url:b.url),
+issued_at:value(b.issued_at),
+expires_at:value(b.expires_at),
+metadata
+};
+}
+if(resource==='task'){
+return{
+title:value(b.title),
+description:value(b.description),
+status:value(b.status,'open'),
+priority:value(b.priority,'medium'),
+due_at:value(b.due_at!==undefined?b.due_at:b.due_date),
+completed_at:value(b.completed_at),
+assigned_to:value(b.assigned_to),
+metadata
+};
+}
+return{
+channel:value(b.channel,'whatsapp'),
+direction:value(b.direction,'outbound'),
+status:value(b.status,'draft'),
+subject:value(b.subject),
+content:value(b.content!==undefined?b.content:b.body),
+external_id:value(b.external_id),
+occurred_at:value(b.occurred_at),
+metadata
+};
+}
+
 async function handler(req,res){
 const orgId=req.org.id;
+
 if(req.method==='GET'){
 try{
 const resource=String(req.query.resource||'profile');
@@ -47,10 +102,12 @@ console.error('GET people operating system:',e);
 return res.status(500).json({error:'Unable to load operating system data'});
 }
 }
+
 if(!['POST','PUT','DELETE'].includes(req.method)){
 res.setHeader('Allow','GET,POST,PUT,DELETE');
 return res.status(405).json({error:'Method not allowed'});
 }
+
 try{
 const b=req.body||{},resource=String(b.resource||''),action=String(b.action||'create');
 if(!allowed.includes(resource))return res.status(400).json({error:'Invalid resource'});
@@ -66,18 +123,21 @@ if(ids.length>500)return res.status(400).json({error:'Bulk operations are limite
 const actionName=String(b.bulk_action||'').trim();
 const valid=await pool.query(`SELECT id FROM people WHERE organization_id=$1 AND id=ANY($2::uuid[]) AND COALESCE(status,'active')='active'`,[orgId,ids]);
 if(valid.rows.length!==ids.length)return res.status(400).json({error:'One or more people were not found in this organization'});
+
 if(actionName==='set_type'){
 const type=String(b.type||'').trim();
 if(!type)return res.status(400).json({error:'type is required'});
 const r=await pool.query(`UPDATE people SET type=$3,updated_at=NOW() WHERE organization_id=$1 AND id=ANY($2::uuid[]) AND COALESCE(status,'active')='active' RETURNING id`,[orgId,ids,type]);
 return res.status(200).json({updated:r.rowCount,ids:r.rows.map(x=>x.id)});
 }
+
 if(actionName==='set_status'){
 const status=String(b.status||'').trim();
 if(!status)return res.status(400).json({error:'status is required'});
 const r=await pool.query(`UPDATE people SET status=$3,updated_at=NOW() WHERE organization_id=$1 AND id=ANY($2::uuid[]) RETURNING id`,[orgId,ids,status]);
 return res.status(200).json({updated:r.rowCount,ids:r.rows.map(x=>x.id)});
 }
+
 if(actionName==='add_group'){
 if(!b.group_id)return res.status(400).json({error:'group_id is required'});
 const g=await pool.query(`SELECT id FROM organization_groups WHERE organization_id=$1 AND id=$2 AND active=true`,[orgId,b.group_id]);
@@ -85,11 +145,13 @@ if(!g.rows.length)return res.status(404).json({error:'Group not found'});
 const r=await pool.query(`INSERT INTO person_memberships(organization_id,person_id,group_id,membership_type,status,role,metadata,created_by) SELECT $1,id,$3,$4,$5,$6,$7,$8 FROM people WHERE organization_id=$1 AND id=ANY($2::uuid[]) AND COALESCE(status,'active')='active' ON CONFLICT DO NOTHING RETURNING person_id`,[orgId,ids,b.group_id,b.membership_type||'member',b.membership_status||'active',b.role||null,json(b.metadata),req.user.id]);
 return res.status(200).json({added:r.rowCount,ids:r.rows.map(x=>x.person_id)});
 }
+
 if(actionName==='remove_group'){
 if(!b.group_id)return res.status(400).json({error:'group_id is required'});
 const r=await pool.query(`DELETE FROM person_memberships WHERE organization_id=$1 AND person_id=ANY($2::uuid[]) AND group_id=$3 RETURNING person_id`,[orgId,ids,b.group_id]);
 return res.status(200).json({removed:r.rowCount,ids:r.rows.map(x=>x.person_id)});
 }
+
 if(actionName==='set_lifecycle'){
 if(!b.stage_id)return res.status(400).json({error:'stage_id is required'});
 const stage=await pool.query(`SELECT id FROM lifecycle_stages WHERE organization_id=$1 AND id=$2 AND active=true`,[orgId,b.stage_id]);
@@ -108,6 +170,7 @@ throw e;
 client.release();
 }
 }
+
 return res.status(400).json({error:'Unsupported bulk action'});
 }
 
@@ -119,7 +182,8 @@ return r.rows.length?res.status(200).json(r.rows[0]):res.status(404).json({error
 }
 if(!personId||!b.related_person_id)return res.status(400).json({error:'person_id and related_person_id are required'});
 if(!await personExists(orgId,b.related_person_id))return res.status(404).json({error:'Related person not found'});
-const r=await pool.query(`INSERT INTO person_relationships(organization_id,person_id,related_person_id,relationship_type,strength,evidence,source,active) VALUES($1,$2,$3,$4,$5,$6,$7,true) ON CONFLICT(organization_id,person_id,related_person_id,relationship_type) DO UPDATE SET strength=EXCLUDED.strength,evidence=EXCLUDED.evidence,source=EXCLUDED.source,active=true,updated_at=NOW() RETURNING *`,[orgId,personId,b.related_person_id,String(b.relationship_type||'related').trim(),Number.isFinite(Number(b.strength))?Number(b.strength):0,json(b.evidence),b.source||'human']);
+const strength=Number.isFinite(Number(b.strength))?Math.max(0,Math.min(1,Number(b.strength))):0;
+const r=await pool.query(`INSERT INTO person_relationships(organization_id,person_id,related_person_id,relationship_type,strength,evidence,source,active) VALUES($1,$2,$3,$4,$5,$6,$7,true) ON CONFLICT(organization_id,person_id,related_person_id,relationship_type) DO UPDATE SET strength=EXCLUDED.strength,evidence=EXCLUDED.evidence,source=EXCLUDED.source,active=true,updated_at=NOW() RETURNING *`,[orgId,personId,b.related_person_id,String(b.relationship_type||'related').trim(),strength,json(b.evidence),b.source||'human']);
 return res.status(200).json(r.rows[0]);
 }
 
@@ -136,7 +200,7 @@ if(!g.rows.length)return res.status(404).json({error:'Group not found'});
 }
 if(action==='update'){
 if(!id||!await rowExists(orgId,'person_memberships',id))return res.status(404).json({error:'Membership not found'});
-const r=await pool.query(`UPDATE person_memberships SET group_id=$3,membership_type=$4,status=$5,role=$6,external_ref=$7,start_date=$8,end_date=$9,metadata=$10 WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id,value(b.group_id),value(b.membership_type,'member'),value(b.status,'active'),value(b.role),value(b.external_ref),value(b.start_date),value(b.end_date),json(b.metadata)]);
+const r=await pool.query(`UPDATE person_memberships SET group_id=$3,membership_type=$4,status=$5,role=$6,external_ref=$7,start_date=$8,end_date=$9,metadata=$10,updated_at=NOW() WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id,value(b.group_id),value(b.membership_type,'member'),value(b.status,'active'),value(b.role),value(b.external_ref),value(b.start_date),value(b.end_date),json(b.metadata)]);
 return res.status(200).json(r.rows[0]);
 }
 const r=await pool.query(`INSERT INTO person_memberships(organization_id,person_id,group_id,membership_type,status,role,external_ref,start_date,end_date,metadata,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,[orgId,personId,value(b.group_id),value(b.membership_type,'member'),value(b.status,'active'),value(b.role),value(b.external_ref),value(b.start_date),value(b.end_date),json(b.metadata),req.user.id]);
@@ -244,77 +308,4 @@ if(resource==='view'){
 const r=await pool.query(`INSERT INTO person_views(organization_id,name,description,filters,columns,sort,visible_to_roles,shared,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[orgId,b.name,value(b.description),json(b.filters),json(b.columns,[]),json(b.sort),json(b.visible_to_roles,['owner','admin']),!!b.shared,req.user.id]);
 return res.status(201).json(r.rows[0]);
 }
-const r=await pool.query(`INSERT INTO person_segments(organization_id,name,description,filters,active,created_by) VALUES($1,$2,$3,$4,true,$5) RETURNING *`,[orgId,b.name,value(b.description),json(b.filters),req.user.id]);
-return res.status(201).json(r.rows[0]);
-}
-
-if(resource==='segment_member'){
-if(action==='delete'){
-if(!b.segment_id||!personId)return res.status(400).json({error:'segment_id and person_id are required'});
-const r=await pool.query(`DELETE FROM person_segment_members WHERE organization_id=$1 AND segment_id=$2 AND person_id=$3 RETURNING *`,[orgId,b.segment_id,personId]);
-return r.rows.length?res.status(200).json(r.rows[0]):res.status(404).json({error:'Segment membership not found'});
-}
-if(!b.segment_id||!personId)return res.status(400).json({error:'segment_id and person_id are required'});
-const segment=await pool.query(`SELECT id FROM person_segments WHERE organization_id=$1 AND id=$2 AND active=true`,[orgId,b.segment_id]);
-if(!segment.rows.length)return res.status(404).json({error:'Segment not found'});
-const r=await pool.query(`INSERT INTO person_segment_members(organization_id,segment_id,person_id) VALUES($1,$2,$3) ON CONFLICT(organization_id,segment_id,person_id) DO NOTHING RETURNING *`,[orgId,b.segment_id,personId]);
-return res.status(201).json(r.rows[0]||null);
-}
-
-if(['financial','document','task','communication'].includes(resource)){
-const table=tables[resource];
-if(action==='delete'){
-if(!id)return res.status(400).json({error:'id is required'});
-const r=await pool.query(`DELETE FROM ${table} WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id]);
-return r.rows.length?res.status(200).json(r.rows[0]):res.status(404).json({error:'Record not found'});
-}
-if(!personId)return res.status(400).json({error:'person_id is required'});
-if(action==='update'){
-if(!id||!await rowExists(orgId,table,id))return res.status(404).json({error:'Record not found'});
-const fields={
-financial:['amount','currency','frequency','source','status','metadata'],
-document:['document_type','name','url','description','metadata'],
-task:['title','description','status','priority','due_date','assigned_to','metadata'],
-communication:['channel','direction','status','subject','body','external_id','metadata']
-}[resource];
-const sets=fields.map((x,i)=>`${x}=$${i+3}`).join(',');
-const vals=fields.map(x=>value(b[x]));
-const r=await pool.query(`UPDATE ${table} SET ${sets},updated_at=NOW() WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id,...vals]);
-return res.status(200).json(r.rows[0]);
-}
-const fields={
-financial:['amount','currency','frequency','source','status','metadata'],
-document:['document_type','name','url','description','metadata'],
-task:['title','description','status','priority','due_date','assigned_to','metadata'],
-communication:['channel','direction','status','subject','body','external_id','metadata']
-}[resource];
-const columns=['organization_id','person_id',...fields,'created_by'];
-const values=[orgId,personId,...fields.map(x=>value(b[x])),req.user.id];
-const placeholders=values.map((_,i)=>`$${i+1}`).join(',');
-const r=await pool.query(`INSERT INTO ${table}(${columns.join(',')}) VALUES(${placeholders}) RETURNING *`,values);
-return res.status(201).json(r.rows[0]);
-}
-
-if(resource==='lifecycle'){
-if(!personId)return res.status(400).json({error:'person_id is required'});
-if(!b.stage_id)return res.status(400).json({error:'stage_id is required'});
-if(!await rowExists(orgId,'lifecycle_stages',b.stage_id))return res.status(404).json({error:'Lifecycle stage not found'});
-const result=await transitionLifecycle(orgId,personId,b.stage_id,{reason:b.reason,evidence:json(b.evidence),changedBy:req.user.id});
-return res.status(200).json(result);
-}
-
-if(resource==='note'){
-if(!personId)return res.status(400).json({error:'person_id is required'});
-if(!b.note)return res.status(400).json({error:'note is required'});
-const event=await addTimelineEvent(orgId,personId,'note',String(b.note),{createdBy:req.user.id,metadata:json(b.metadata)});
-return res.status(201).json(event);
-}
-
-return res.status(400).json({error:'Unsupported resource action'});
-}catch(e){
-console.error('People operating system:',e);
-return res.status(500).json({error:e.message||'Unable to process operating system request'});
-}
-}
-
-export default withOrg(handler);
+const r=await pool.query(`INSERT INTO person_segments(organization_id,name,description,filters,active,created_by) VALUES($1,$2,$3
