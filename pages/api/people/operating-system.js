@@ -101,7 +101,12 @@ await client.query(`UPDATE person_lifecycle SET ended_at=NOW() WHERE organizatio
 await client.query(`INSERT INTO person_lifecycle(organization_id,person_id,stage_id,reason,evidence,changed_by) SELECT $1,id,$3,$4,$5,$6 FROM people WHERE organization_id=$1 AND id=ANY($2::uuid[])`,[orgId,ids,b.stage_id,b.reason||null,json(b.evidence),req.user.id]);
 await client.query('COMMIT');
 return res.status(200).json({updated:ids.length,ids});
-}catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}
+}catch(e){
+await client.query('ROLLBACK');
+throw e;
+}finally{
+client.release();
+}
 }
 return res.status(400).json({error:'Unsupported bulk action'});
 }
