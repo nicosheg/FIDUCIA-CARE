@@ -308,4 +308,67 @@ if(resource==='view'){
 const r=await pool.query(`INSERT INTO person_views(organization_id,name,description,filters,columns,sort,visible_to_roles,shared,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[orgId,b.name,value(b.description),json(b.filters),json(b.columns,[]),json(b.sort),json(b.visible_to_roles,['owner','admin']),!!b.shared,req.user.id]);
 return res.status(201).json(r.rows[0]);
 }
-const r=await pool.query(`INSERT INTO person_segments(organization_id,name,description,filters,active,created_by) VALUES($1,$2,$3
+const r=await pool.query(`INSERT INTO person_segments(organization_id,name,description,filters,active,created_by) VALUES($1,$2,$3,$4,true,$5) RETURNING *`,[orgId,b.name,value(b.description),json(b.filters),req.user.id]);
+return res.status(201).json(r.rows[0]);
+}
+
+if(resource==='segment_member'){
+if(action==='delete'){
+if(!b.segment_id||!personId)return res.status(400).json({error:'segment_id and person_id are required'});
+const r=await pool.query(`DELETE FROM person_segment_members WHERE organization_id=$1 AND segment_id=$2 AND person_id=$3 RETURNING *`,[orgId,b.segment_id,personId]);
+return r.rows.length?res.status(200).json(r.rows[0]):res.status(404).json({error:'Segment membership not found'});
+}
+if(!b.segment_id||!personId)return res.status(400).json({error:'segment_id and person_id are required'});
+const segment=await pool.query(`SELECT id FROM person_segments WHERE organization_id=$1 AND id=$2 AND active=true`,[orgId,b.segment_id]);
+if(!segment.rows.length)return res.status(404).json({error:'Segment not found'});
+const r=await pool.query(`INSERT INTO person_segment_members(organization_id,segment_id,person_id) VALUES($1,$2,$3) ON CONFLICT(organization_id,segment_id,person_id) DO NOTHING RETURNING *`,[orgId,b.segment_id,personId]);
+return res.status(201).json(r.rows[0]||null);
+}
+
+if(['financial','document','task','communication'].includes(resource)){
+const table=tables[resource];
+if(action==='delete'){
+if(!id)return res.status(400).json({error:'id is required'});
+const r=await pool.query(`DELETE FROM ${table} WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id]);
+return r.rows.length?res.status(200).json(r.rows[0]):res.status(404).json({error:'Record not found'});
+}
+if(!personId)return res.status(400).json({error:'person_id is required'});
+const data=resourceData(resource,b);
+const fields=Object.keys(data);
+if(action==='update'){
+if(!id||!await rowExists(orgId,table,id))return res.status(404).json({error:'Record not found'});
+const sets=fields.map((x,i)=>`${x}=$${i+3}`).join(',');
+const vals=fields.map(x=>data[x]);
+const r=await pool.query(`UPDATE ${table} SET ${sets},updated_at=NOW() WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id,...vals]);
+return res.status(200).json(r.rows[0]);
+}
+const columns=['organization_id','person_id',...fields,'created_by'];
+const values=[orgId,personId,...fields.map(x=>data[x]),req.user.id];
+const placeholders=values.map((_,i)=>`$${i+1}`).join(',');
+const r=await pool.query(`INSERT INTO ${table}(${columns.join(',')}) VALUES(${placeholders}) RETURNING *`,values);
+return res.status(201).json(r.rows[0]);
+}
+
+if(resource==='lifecycle'){
+if(!personId)return res.status(400).json({error:'person_id is required'});
+if(!b.stage_id)return res.status(400).json({error:'stage_id is required'});
+if(!await rowExists(orgId,'lifecycle_stages',b.stage_id))return res.status(404).json({error:'Lifecycle stage not found'});
+const result=await transitionLifecycle(orgId,personId,b.stage_id,{reason:b.reason,evidence:json(b.evidence),changedBy:req.user.id});
+return res.status(200).json(result);
+}
+
+if(resource==='note'){
+if(!personId)return res.status(400).json({error:'person_id is required'});
+if(!b.note)return res.status(400).json({error:'note is required'});
+const event=await addTimelineEvent(orgId,personId,'note',String(b.note),{createdBy:req.user.id,metadata:json(b.metadata)});
+return res.status(201).json(event);
+}
+
+return res.status(400).json({error:'Unsupported resource action'});
+}catch(e){
+console.error('People operating system:',e);
+return res.status(500).json({error:e.message||'Unable to process operating system request'});
+}
+}
+
+export default withOrg(handler);
