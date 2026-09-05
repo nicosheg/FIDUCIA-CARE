@@ -263,4 +263,57 @@ return res.status(201).json(r.rows[0]);
 if(resource==='lifecycle_stage'){
 if(action==='delete'){
 if(!id)return res.status(400).json({error:'id is required'});
-const r=await pool.query(`UPDATE lifecycle_stages SET active=false,updated_at=NOW() WHERE organi
+const r=await pool.query(`UPDATE lifecycle_stages SET active=false,updated_at=NOW() WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id]);
+return r.rows.length?res.status(200).json(r.rows[0]):res.status(404).json({error:'Lifecycle stage not found'});
+}
+if(!b.name||!b.stage_key)return res.status(400).json({error:'name and stage_key are required'});
+if(action==='update'){
+if(!id||!await rowExists(orgId,'lifecycle_stages',id))return res.status(404).json({error:'Lifecycle stage not found'});
+const r=await pool.query(`UPDATE lifecycle_stages SET name=$3,stage_key=$4,description=$5,active=$6,sort_order=$7,color=$8,is_default=$9,metadata=$10,updated_at=NOW() WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id,String(b.name).trim(),String(b.stage_key).trim(),value(b.description,''),value(b.active,true),value(b.sort_order,0),value(b.color),value(b.is_default,false),json(b.metadata)]);
+return res.status(200).json(r.rows[0]);
+}
+const r=await pool.query(`INSERT INTO lifecycle_stages(organization_id,name,stage_key,description,sort_order,color,is_default,active,metadata,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,[orgId,String(b.name).trim(),String(b.stage_key).trim(),value(b.description,''),value(b.sort_order,0),value(b.color),value(b.is_default,false),value(b.active,true),json(b.metadata),req.user.id]);
+return res.status(201).json(r.rows[0]);
+}
+
+if(resource==='view'||resource==='segment'){
+const table=resource==='view'?'person_views':'person_segments';
+if(action==='delete'){
+if(!id)return res.status(400).json({error:'id is required'});
+const r=await pool.query(`DELETE FROM ${table} WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id]);
+return r.rows.length?res.status(200).json(r.rows[0]):res.status(404).json({error:`${resource} not found`});
+}
+if(!b.name)return res.status(400).json({error:'name is required'});
+const data=resource==='view'?{name:String(b.name).trim(),description:value(b.description,''),filters:json(b.filters),columns:Array.isArray(b.columns)?b.columns:[],sort:json(b.sort),visible_to_roles:Array.isArray(b.visible_to_roles)?b.visible_to_roles:[],shared:value(b.shared,false)}:{name:String(b.name).trim(),description:value(b.description,''),filters:json(b.filters),active:value(b.active,true)};
+if(action==='update'){
+if(!id||!await rowExists(orgId,table,id))return res.status(404).json({error:`${resource} not found`});
+const keys=Object.keys(data),sets=keys.map((k,i)=>`${k}=$${i+3}`).join(','),vals=keys.map(k=>data[k]);
+const r=await pool.query(`UPDATE ${table} SET ${sets},updated_at=NOW() WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id,...vals]);
+return res.status(200).json(r.rows[0]);
+}
+const keys=Object.keys(data),cols=['organization_id',...keys,'created_by'],vals=[orgId,...keys.map(k=>data[k]),req.user.id],placeholders=cols.map((_,i)=>`$${i+1}`).join(',');
+const r=await pool.query(`INSERT INTO ${table}(${cols.join(',')}) VALUES(${placeholders}) RETURNING *`,vals);
+return res.status(201).json(r.rows[0]);
+}
+
+if(resource==='segment_member'){
+if(action==='delete'){
+if(!id)return res.status(400).json({error:'id is required'});
+const r=await pool.query(`DELETE FROM person_segment_members WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id]);
+return r.rows.length?res.status(200).json(r.rows[0]):res.status(404).json({error:'Segment member not found'});
+}
+if(!b.segment_id||!personId)return res.status(400).json({error:'segment_id and person_id are required'});
+const existing=await pool.query(`SELECT id FROM person_segment_members WHERE organization_id=$1 AND segment_id=$2 AND person_id=$3 LIMIT 1`,[orgId,b.segment_id,personId]);
+if(existing.rows.length)return res.status(200).json({success:true,id:existing.rows[0].id});
+const r=await pool.query(`INSERT INTO person_segment_members(organization_id,segment_id,person_id) VALUES($1,$2,$3) RETURNING *`,[orgId,b.segment_id,personId]);
+return res.status(201).json(r.rows[0]);
+}
+
+return res.status(400).json({error:'Unsupported resource action'});
+}catch(e){
+console.error('People operating system error:',e);
+return res.status(500).json({error:'Unable to update operating system data'});
+}
+}
+
+export default withOrg(handler);
