@@ -257,4 +257,39 @@ if(resource==='view'||resource==='segment'){
 const table=resource==='view'?'person_views':'person_segments';
 if(action==='delete'){
 if(!id)return res.status(400).json({error:'id is required'});
-const r=await pool.query(`DELETE FROM ${table} WHERE organization_id
+const r=await pool.query(`DELETE FROM ${table} WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id]);
+return r.rows.length?res.status(200).json(r.rows[0]):res.status(404).json({error:`${resource} not found`});
+}
+if(!b.name)return res.status(400).json({error:'name is required'});
+const data=resource==='view'?{name:String(b.name).trim(),description:value(b.description,''),filters:json(b.filters),columns:json(b.columns),sort:json(b.sort),visible_to_roles:json(b.visible_to_roles),shared:value(b.shared,false)}:{name:String(b.name).trim(),description:value(b.description,''),filters:json(b.filters),active:value(b.active,true)};
+if(action==='update'){
+if(!id||!await rowExists(orgId,table,id))return res.status(404).json({error:`${resource} not found`});
+const keys=Object.keys(data),sets=keys.map((k,i)=>`${k}=$${i+3}`).join(','),vals=keys.map(k=>data[k]);
+const r=await pool.query(`UPDATE ${table} SET ${sets},updated_at=NOW() WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id,...vals]);
+return res.status(200).json(r.rows[0]);
+}
+const keys=Object.keys(data),cols=['organization_id',...keys,'created_by'],vals=[orgId,...keys.map(k=>data[k]),req.user.id];
+const r=await pool.query(`INSERT INTO ${table}(${cols.join(',')}) VALUES(${cols.map((_,i)=>`$${i+1}`).join(',')}) RETURNING *`,vals);
+return res.status(201).json(r.rows[0]);
+}
+
+if(resource==='segment_member'){
+if(action==='delete'){
+if(!id)return res.status(400).json({error:'id is required'});
+const r=await pool.query(`DELETE FROM person_segment_members WHERE organization_id=$1 AND id=$2 RETURNING *`,[orgId,id]);
+return r.rows.length?res.status(200).json(r.rows[0]):res.status(404).json({error:'Segment member not found'});
+}
+if(!b.segment_id||!personId)return res.status(400).json({error:'segment_id and person_id are required'});
+const r=await pool.query(`INSERT INTO person_segment_members(organization_id,segment_id,person_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING *`,[orgId,b.segment_id,personId]);
+return r.rows.length?res.status(201).json(r.rows[0]):res.status(200).json({success:true});
+}
+
+if(resource==='lifecycle_stage'||resource==='field_definition')return res.status(400).json({error:'Unsupported action'});
+return res.status(400).json({error:'Unsupported resource action'});
+}catch(e){
+console.error('People operating system error:',e);
+return res.status(500).json({error:'Unable to update operating system data'});
+}
+}
+
+export default withOrg(handler);
