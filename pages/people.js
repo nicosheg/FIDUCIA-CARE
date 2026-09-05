@@ -27,6 +27,7 @@ d.setFullYear(today.getFullYear());
 if(d<today)d.setFullYear(today.getFullYear()+1);
 return Math.max(0,Math.ceil((d-today)/86400000));
 };
+
 const statusColor=s=>s==='alive'?'#8FB7FF':s==='needs_decision'?'#D4AF37':s==='conflict'?'#8FB7FF':'rgba(255,255,255,.4)';
 const statusLabel=s=>s==='alive'?'Stable Truth':s==='needs_decision'?'Needs Evidence':s==='conflict'?'Human Review Required':'';
 const statusExplanation=(s,c)=>s==='alive'?`ARIA is highly confident this identity is correct. (Confidence: ${c||90}%)`:s==='needs_decision'?'ARIA needs more evidence before confirming this identity.':s==='conflict'?'ARIA found multiple possible identities and requires human review.':null;
@@ -40,13 +41,13 @@ return <div style={{maxWidth:1100,margin:'0 auto',padding:20}}>
 <div style={{height:36,width:'30%',borderRadius:8,marginBottom:25,background:'rgba(255,255,255,.04)'}}/>
 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(270px,1fr))',gap:20}}>
 {[1,2,3,4,5,6].map(i=><div key={i} className="fiducia-card shimmer" style={{padding:24,height:180}}/>)}
-</div></div>;
+</div>
+</div>;
 }
 
 export default function PeoplePage(){
 const onboarding=useOnboarding();
 const[people,setPeople]=useState([]);
-const[filtered,setFiltered]=useState([]);
 const[search,setSearch]=useState('');
 const[roleFilter,setRoleFilter]=useState('all');
 const[showLivingTruthOnly,setShowLivingTruthOnly]=useState(false);
@@ -70,9 +71,9 @@ const[selectMode,setSelectMode]=useState(false);
 const[selectedIds,setSelectedIds]=useState(new Set());
 const[reviewItems,setReviewItems]=useState([]);
 const[showReviewPanel,setShowReviewPanel]=useState(false);
-const[timer,setTimer]=useState(null);
-const longPressTriggered=useRef(false);
 const[accessToken,setAccessToken]=useState(null);
+const longPressTimer=useRef(null);
+const longPressTriggered=useRef(false);
 
 const flash=useCallback(text=>{
 setMsg(text);
@@ -99,11 +100,14 @@ fetchPeople(session.access_token);
 fetch('/api/aria/initialize',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`},body:'{}'}).catch(()=>{});
 }else setLoading(false);
 });
-return()=>{mounted=false;if(timer)clearTimeout(timer)};
-},[fetchPeople,timer]);
+return()=>{
+mounted=false;
+if(longPressTimer.current)window.clearTimeout(longPressTimer.current);
+};
+},[fetchPeople]);
 
 useEffect(()=>{
-const items=people.filter(p=>p.living_truth&&(p.living_truth.status==='needs_decision'||p.living_truth.status==='conflict')).map(p=>({
+setReviewItems(people.filter(p=>p.living_truth&&(p.living_truth.status==='needs_decision'||p.living_truth.status==='conflict')).map(p=>({
 person_id:p.id,
 extracted_name:p.display_name||[p.first_name,p.last_name].filter(Boolean).join(' ')||p.first_name||'Unknown',
 extracted_phone:p.phone,
@@ -111,44 +115,46 @@ status:p.living_truth.status,
 confidence:p.living_truth.confidence||70,
 candidates:Array.isArray(p.living_truth.candidate_ids)?p.living_truth.candidate_ids:[],
 resolved:false
-}));
-setReviewItems(items);
+})));
 },[people]);
 
-useEffect(()=>{
-let result=[...people];
-if(roleFilter!=='all')result=result.filter(p=>p.type===roleFilter);
-if(showLivingTruthOnly)result=result.filter(p=>p.living_truth&&(p.living_truth.status==='needs_decision'||p.living_truth.status==='conflict'));
+const filtered=people.filter(p=>{
+if(roleFilter!=='all'&&p.type!==roleFilter)return false;
+if(showLivingTruthOnly&&!(p.living_truth&&(p.living_truth.status==='needs_decision'||p.living_truth.status==='conflict')))return false;
 const q=search.trim().toLowerCase();
-if(q)result=result.filter(p=>{
+if(!q)return true;
 const name=[p.display_name,p.first_name,p.last_name].filter(Boolean).join(' ').toLowerCase();
 return name.includes(q)||(p.phone||'').toLowerCase().includes(q)||(p.email||'').toLowerCase().includes(q);
 });
-setFiltered(result);
-},[people,search,roleFilter,showLivingTruthOnly]);
 
-const beginLongPress=useCallback(id=>{
+const beginLongPress=id=>{
 longPressTriggered.current=false;
-const handle=window.setTimeout(()=>{
+if(longPressTimer.current)window.clearTimeout(longPressTimer.current);
+longPressTimer.current=window.setTimeout(()=>{
 longPressTriggered.current=true;
 setSelectMode(true);
 setSelectedIds(prev=>new Set(prev).add(id));
 setExpandedId(null);
 if(navigator.vibrate)navigator.vibrate(50);
 },650);
-setTimer(handle);
-},[]);
+};
 
-const endLongPress=useCallback(()=>{
-if(timer){clearTimeout(timer);setTimer(null)}
-},[timer]);
+const endLongPress=()=>{
+if(longPressTimer.current){
+window.clearTimeout(longPressTimer.current);
+longPressTimer.current=null;
+}
+};
 
 const handleCardClick=id=>{
-if(longPressTriggered.current){longPressTriggered.current=false;return}
+if(longPressTriggered.current){
+longPressTriggered.current=false;
+return;
+}
 if(selectMode){
 setSelectedIds(prev=>{
 const next=new Set(prev);
-next.has(id)?next.delete(id):next.add(id);
+if(next.has(id))next.delete(id);else next.add(id);
 return next;
 });
 return;
@@ -162,7 +168,12 @@ setConvText('');
 };
 
 const selectAll=()=>setSelectedIds(new Set(filtered.map(p=>p.id)));
-const cancelSelect=()=>{setSelectMode(false);setSelectedIds(new Set());longPressTriggered.current=false};
+const cancelSelect=()=>{
+setSelectMode(false);
+setSelectedIds(new Set());
+longPressTriggered.current=false;
+};
+
 const startEdit=person=>{
 setExpandedId(person.id);
 setEditingId(person.id);
@@ -173,6 +184,7 @@ setEditBirthday(person.birthday||'');
 setAddingNote(false);
 setImportingConv(false);
 };
+
 const cancelEdit=()=>{
 setEditingId(null);
 setEditName('');
@@ -180,7 +192,6 @@ setEditPhone('');
 setEditEmail('');
 setEditBirthday('');
 };
-
 const addPerson=async e=>{
 e.preventDefault();
 if(!form.full_name.trim()||!accessToken)return;
@@ -201,7 +212,7 @@ try{
 const res=await fetch('/api/people',{method:'PUT',headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},body:JSON.stringify({id,full_name:editName.trim(),phone:editPhone,email:editEmail,type:people.find(p=>p.id===id)?.type||'visitor',birthday:editBirthday||null})});
 const data=await res.json();
 if(!res.ok||!data.id)throw new Error(data.error||'Update failed');
-setPeople(prev=>prev.map(p=>p.id===id?data:p));
+setPeople(prev=>prev.map(p=>p.id===id?{...data,last_attended_date:p.last_attended_date,last_contacted:p.last_contacted}:p));
 cancelEdit();
 flash('Person updated');
 }catch(err){flash(err.message||'Error updating person')}
@@ -209,7 +220,7 @@ flash('Person updated');
 
 const deletePerson=async(id,e)=>{
 if(e)e.stopPropagation();
-if(!accessToken||!confirm('Remove this person?'))return;
+if(!accessToken||!window.confirm('Remove this person?'))return;
 try{
 const res=await fetch('/api/people/delete',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},body:JSON.stringify({id})});
 const data=await res.json();
@@ -221,7 +232,7 @@ flash('Person removed');
 };
 
 const bulkDelete=async()=>{
-if(!selectedIds.size||!accessToken||!confirm(`Remove ${selectedIds.size} selected people?`))return;
+if(!selectedIds.size||!accessToken||!window.confirm(`Remove ${selectedIds.size} selected people?`))return;
 try{
 const res=await fetch('/api/people/delete',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},body:JSON.stringify({ids:[...selectedIds]})});
 const data=await res.json();
@@ -231,13 +242,14 @@ flash(`Removed ${data.deleted} people`);
 cancelSelect();
 }catch(err){flash(err.message||'Error removing people')}
 };
-  const generateDraft=async id=>{
+
+const generateDraft=async id=>{
 if(!accessToken)return;
 try{
 const res=await fetch('/api/presence/draft',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${accessToken}`},body:JSON.stringify({person_id:id})});
 const data=await res.json();
 if(!res.ok||!data.message)throw new Error(data.error||'Draft failed');
-if(confirm(data.message+'\n\nOpen WhatsApp to send?')){
+if(window.confirm(`${data.message}\n\nOpen WhatsApp to send?`)){
 const person=people.find(p=>p.id===id);
 if(!person?.phone)throw new Error('This person has no phone number.');
 const phone=person.phone.startsWith('+')?person.phone.slice(1):person.phone;
@@ -267,7 +279,7 @@ const data=await res.json();
 if(!res.ok||!data.success)throw new Error(data.error||'Import failed');
 setConvText('');
 setImportingConv(false);
-flash(`Conversation imported · ${data.extracted} key events extracted`);
+flash(`Conversation imported · ${data.extracted||0} key events extracted`);
 }catch(err){flash(err.message||'Error importing conversation')}
 };
 
@@ -291,6 +303,7 @@ total:reviewItems.length,
 needs_decision:reviewItems.filter(i=>i.status==='needs_decision').length,
 conflict:reviewItems.filter(i=>i.status==='conflict').length
 };
+
 const showPeopleExperience=onboarding?.loaded&&onboarding.enabled&&!onboarding.isExperienced('people');
 
 return <Layout>
@@ -310,19 +323,7 @@ return <Layout>
 </div>
 
 <div style={{marginBottom:20}}>
-{reviewStats.total===0?
-<div style={{display:'flex',alignItems:'center',gap:10,color:'rgba(255,255,255,.3)'}}>
-<div style={{width:8,height:8,borderRadius:'50%',background:'rgba(255,255,255,.1)'}}/>
-<span style={{fontSize:14}}>Living Truth · Everything is settled</span>
-</div>:
-<div className="living-truth-banner" onClick={()=>setShowReviewPanel(true)} style={{display:'flex',alignItems:'center',gap:12,cursor:'pointer',padding:'8px 0',borderBottom:'1px solid rgba(143,183,255,.1)'}}>
-<div style={{width:8,height:8,borderRadius:'50%',background:'#8FB7FF',animation:'pulse 4s ease-in-out infinite'}}/>
-<span style={{color:'#8FB7FF',fontWeight:500}}>Living Truth · {reviewStats.total} identities need attention</span>
-<span style={{marginLeft:'auto',color:'rgba(255,255,255,.3)',fontSize:12}}>
-{reviewStats.needs_decision>0&&`${reviewStats.needs_decision} need decision `}
-{reviewStats.conflict>0&&`${reviewStats.conflict} conflict`}
-</span>
-</div>}
+{reviewStats.total===0?<div style={{display:'flex',alignItems:'center',gap:10,color:'rgba(255,255,255,.3)'}}><div style={{width:8,height:8,borderRadius:'50%',background:'rgba(255,255,255,.1)'}}/><span style={{fontSize:14}}>Living Truth · Everything is settled</span></div>:<div className="living-truth-banner" onClick={()=>setShowReviewPanel(true)} style={{display:'flex',alignItems:'center',gap:12,cursor:'pointer',padding:'8px 0',borderBottom:'1px solid rgba(143,183,255,.1)'}}><div style={{width:8,height:8,borderRadius:'50%',background:'#8FB7FF',animation:'pulse 4s ease-in-out infinite'}}/><span style={{color:'#8FB7FF',fontWeight:500}}>Living Truth · {reviewStats.total} identities need attention</span><span style={{marginLeft:'auto',color:'rgba(255,255,255,.3)',fontSize:12}}>{reviewStats.needs_decision>0&&`${reviewStats.needs_decision} need decision `}{reviewStats.conflict>0&&`${reviewStats.conflict} conflict`}</span></div>}
 </div>
 
 {showReviewPanel&&<div className="review-panel-overlay" onClick={()=>setShowReviewPanel(false)}>
@@ -331,8 +332,7 @@ return <Layout>
 <h3 style={{color:'#f0f0f0',margin:0}}>Review Needed</h3>
 <button onClick={()=>setShowReviewPanel(false)} className="fiducia-button fiducia-button-ghost">Close</button>
 </div>
-{reviewItems.length===0?<p style={{color:'rgba(255,255,255,.5)'}}>No unresolved identities.</p>:
-<div style={{display:'flex',flexDirection:'column',gap:12}}>
+{reviewItems.length===0?<p style={{color:'rgba(255,255,255,.5)'}}>No unresolved identities.</p>:<div style={{display:'flex',flexDirection:'column',gap:12}}>
 {reviewItems.map(item=><div key={`${item.person_id}-${item.extracted_name}`} className="review-item">
 <div>
 <span style={{color:'#f0f0f0',fontWeight:500}}>{item.extracted_name}</span>
@@ -381,12 +381,7 @@ return <Layout>
 {msg&&<div className="fiducia-card" style={{padding:10,marginBottom:15,color:'#34D399',textAlign:'center'}}>{msg}</div>}
 
 <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(270px,1fr))',gap:20}}>
-{filtered.length===0?
-<div className="empty-state">
-<div style={{fontSize:18,color:'#f0f0f0',marginBottom:8}}>{search||roleFilter!=='all'?'No people found':'No people yet'}</div>
-<div style={{fontSize:13,color:'rgba(255,255,255,.35)',maxWidth:420}}>{search||roleFilter!=='all'?'Try a different search or filter.':'Add your first person or use Scan to begin building the people your organization knows.'}</div>
-</div>:
-filtered.map(person=>{
+{filtered.length===0?<div className="empty-state"><div style={{fontSize:18,color:'#f0f0f0',marginBottom:8}}>{search||roleFilter!=='all'?'No people found':'No people yet'}</div><div style={{fontSize:13,color:'rgba(255,255,255,.35)',maxWidth:420}}>{search||roleFilter!=='all'?'Try a different search or filter.':'Add your first person or use Scan to begin building the people your organization knows.'}</div></div>:filtered.map(person=>{
 const truth=person.living_truth;
 const status=truth?.status||null;
 const label=statusLabel(status);
@@ -396,8 +391,7 @@ const editing=editingId===person.id;
 const fullName=[person.first_name,person.last_name].filter(Boolean).join(' ')||person.display_name||'Unnamed person';
 return <div key={person.id} className={`fiducia-card person-card ${expanded?'expanded-card':''}`} onPointerDown={()=>beginLongPress(person.id)} onPointerUp={endLongPress} onPointerCancel={endLongPress} onPointerLeave={endLongPress} onClick={()=>handleCardClick(person.id)} style={{cursor:'pointer',border:selectedIds.has(person.id)?'1px solid #D4AF37':undefined,background:selectedIds.has(person.id)?'rgba(212,175,55,.08)':undefined,userSelect:'none',WebkitUserSelect:'none',position:'relative'}}>
 {selectMode&&<div style={{position:'absolute',top:12,right:12,width:22,height:22,borderRadius:6,display:'flex',alignItems:'center',justifyContent:'center',background:selectedIds.has(person.id)?'rgba(212,175,55,.12)':'rgba(255,255,255,.03)',border:selectedIds.has(person.id)?'1px solid rgba(212,175,55,.4)':'1px solid rgba(255,255,255,.18)'}}>{selectedIds.has(person.id)?ICONS.check:null}</div>}
-{editing?
-<div onClick={e=>e.stopPropagation()} style={{display:'flex',flexDirection:'column',gap:8}}>
+{editing?<div onClick={e=>e.stopPropagation()} style={{display:'flex',flexDirection:'column',gap:8}}>
 <input value={editName} onChange={e=>setEditName(e.target.value)} style={inputStyle} placeholder="Full Name"/>
 <input value={editPhone} onChange={e=>setEditPhone(e.target.value)} style={inputStyle} placeholder="Phone"/>
 <input type="email" value={editEmail} onChange={e=>setEditEmail(e.target.value)} style={inputStyle} placeholder="Email"/>
@@ -409,8 +403,7 @@ return <div key={person.id} className={`fiducia-card person-card ${expanded?'exp
 <button onClick={e=>{e.stopPropagation();saveEdit(person.id)}} className="fiducia-button fiducia-button-primary" style={{padding:'6px 12px',fontSize:13}}>Save</button>
 <button onClick={e=>{e.stopPropagation();cancelEdit()}} className="fiducia-button fiducia-button-ghost" style={{padding:'6px 12px',fontSize:13}}>Cancel</button>
 </div>
-</div>:
-<>
+</div>:<>
 <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10}}>
 <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',minWidth:0}}>
 <span style={{fontWeight:600,fontSize:17,color:'#f0f0f0',overflow:'hidden',textOverflow:'ellipsis'}}>{fullName}</span>
@@ -456,9 +449,9 @@ return <div key={person.id} className={`fiducia-card person-card ${expanded?'exp
 </div>}
 </>}
 </div>
-});
-}
+})}
 </div>
+
 {showPicker&&<BirthdayPicker isOpen={showPicker} value={pickerTarget==='add'?form.birthday:editBirthday} onSave={value=>{if(pickerTarget==='add')setForm(f=>({...f,birthday:value||''}));else setEditBirthday(value||'');setShowPicker(false)}} onCancel={()=>setShowPicker(false)}/>}
 </div>
 </Layout>;
